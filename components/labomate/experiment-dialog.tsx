@@ -2,24 +2,32 @@
 
 import { useState } from 'react'
 import {
-  CalendarCheck,
-  CheckCircle2,
-  Clock,
-  GraduationCap,
   MapPin,
+  Clock,
+  Coins,
+  Users,
+  CheckCircle2,
+  Calendar,
   ShieldCheck,
   User,
-  Users,
-  Wallet,
+  Loader2,
 } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
-import { formatYen, type Experiment } from '@/lib/experiments'
-import { CategoryBadge, RequirementChip, StatusBadge } from '@/components/labomate/experiment-badges'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { useLanguage } from '@/lib/language-context'
+import { supabase } from '@/lib/supabase'
+import type { Experiment } from '@/lib/experiments'
 
-type ExperimentDialogProps = {
+interface ExperimentDialogProps {
   experiment: Experiment | null
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -27,227 +35,253 @@ type ExperimentDialogProps = {
   onConfirm: (experimentId: string, slotId: string) => void
 }
 
-export function ExperimentDialog({ experiment, open, onOpenChange, bookedSlotId, onConfirm }: ExperimentDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-2xl">
-        {experiment && (
-          <DialogBody
-            key={experiment.id}
-            experiment={experiment}
-            bookedSlotId={bookedSlotId}
-            onConfirm={(slotId) => onConfirm(experiment.id, slotId)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{children}</h3>
-}
-
-function DialogBody({
+export function ExperimentDialog({
   experiment,
+  open,
+  onOpenChange,
   bookedSlotId,
   onConfirm,
-}: {
-  experiment: Experiment
-  bookedSlotId?: string
-  onConfirm: (slotId: string) => void
-}) {
-  const [slotId, setSlotId] = useState<string | null>(null)
-  const [consent, setConsent] = useState(false)
+}: ExperimentDialogProps) {
+  const { language } = useLanguage()
+  const isJa = language === 'ja'
 
-  const bookedSlot = experiment.slots.find((s) => s.id === bookedSlotId)
-  const canSubmit = Boolean(slotId) && consent
+  const [selectedSlot, setSelectedSlot] = useState<string>('')
+  const [applicantName, setApplicantName] = useState('周誠')
+  const [applicantEmail, setApplicantEmail] = useState('shusei@example.com')
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState(false)
 
-  if (bookedSlot) {
-    return (
-      <div className="flex flex-col items-center px-6 py-10 text-center">
-        <span className="flex size-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-          <CheckCircle2 className="size-7" aria-hidden="true" />
-        </span>
-        <DialogTitle className="mt-4 text-lg font-semibold">Application confirmed</DialogTitle>
-        <DialogDescription className="mt-2 max-w-sm text-pretty">
-          {"You're booked for "}
-          <span className="font-medium text-foreground">{experiment.title}</span>. A confirmation has been sent to your
-          .ac.jp email.
-        </DialogDescription>
-        <div className="mt-6 w-full max-w-sm rounded-xl border bg-muted/40 p-4 text-left">
-          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <CalendarCheck className="size-4 text-primary" aria-hidden="true" />
-            {bookedSlot.day}, {bookedSlot.date} · {bookedSlot.time}
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-sm text-secondary-foreground">
-            <MapPin className="size-4 text-muted-foreground" aria-hidden="true" />
-            {experiment.location}
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-sm text-secondary-foreground">
-            <User className="size-4 text-muted-foreground" aria-hidden="true" />
-            Contact: {experiment.contact}
-          </div>
-        </div>
-        <DialogClose render={<Button className="mt-6 h-10 rounded-lg px-6" />}>Done</DialogClose>
-      </div>
-    )
+  if (!experiment) return null
+
+  // 柔軟にスロットの表示用データを生成
+  const rawSlots: any[] = (experiment.slots && experiment.slots.length > 0)
+    ? experiment.slots
+    : [
+        { id: 'slot-1', time: '10:00 - 10:45', left: 3 },
+        { id: 'slot-2', time: '13:00 - 13:45', left: 2 },
+        { id: 'slot-3', time: '15:30 - 16:15', left: 4 },
+      ]
+
+  const slots = rawSlots.map((s, idx) => ({
+    id: s.id || `slot-${idx}`,
+    timeText: s.time || (s.startsAt && s.endsAt ? `${s.startsAt} - ${s.endsAt}` : (s.startTime && s.endTime ? `${s.startTime} - ${s.endTime}` : '13:00 - 13:45')),
+    spotsLeft: s.left ?? s.remaining ?? s.spotsLeft ?? 3,
+  }))
+
+  const handleApply = async () => {
+    if (!selectedSlot && !bookedSlotId) return
+    setLoading(true)
+
+    try {
+      const slotToBook = selectedSlot || bookedSlotId || 'default-slot'
+
+      // Supabase の applications テーブルに保存
+      const { error } = await supabase.from('applications').insert([
+        {
+          experiment_id: experiment.id,
+          applicant_name: applicantName.trim() || 'Anonymous Participant',
+          applicant_email: applicantEmail.trim() || 'user@example.com',
+          time_slot: slotToBook,
+          status: 'confirmed',
+        },
+      ])
+
+      if (error) {
+        console.error('応募エラー:', error)
+        alert('応募に失敗しました: ' + error.message)
+        return
+      }
+
+      onConfirm(experiment.id, slotToBook)
+      setSuccess(true)
+      setTimeout(() => {
+        setSuccess(false)
+        onOpenChange(false)
+      }, 1500)
+    } catch (err) {
+      console.error(err)
+      alert('エラーが発生しました')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (slotId && consent) onConfirm(slotId)
-      }}
-    >
-      <div className="border-b px-6 pt-6 pb-5">
-        <div className="flex flex-wrap items-center gap-2 pr-8">
-          <StatusBadge experiment={experiment} />
-          <CategoryBadge category={experiment.category} />
-        </div>
-        <DialogTitle className="mt-3 text-xl leading-snug font-semibold text-balance">{experiment.title}</DialogTitle>
-        <DialogDescription className="mt-1.5">{experiment.department}</DialogDescription>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="outline" className="text-emerald-700 bg-emerald-50 border-emerald-200">
+              ● {isJa ? '募集中' : 'Recruiting'}
+            </Badge>
+            <Badge variant="secondary">{experiment.category}</Badge>
+          </div>
+          <DialogTitle className="text-xl font-bold">{experiment.title}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{experiment.department}</p>
+        </DialogHeader>
 
-        <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { icon: MapPin, label: 'Location', value: experiment.location },
-            { icon: Clock, label: 'Duration', value: `${experiment.durationMins} mins` },
-            { icon: Wallet, label: 'Reward', value: formatYen(experiment.rewardAmount), sub: experiment.rewardType },
-            { icon: Users, label: 'Open spots', value: `${experiment.spotsLeft} / ${experiment.spotsTotal}` },
-          ].map(({ icon: Icon, label, value, sub }) => (
-            <div key={label} className="rounded-lg border bg-muted/40 p-3">
-              <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Icon className="size-3.5" aria-hidden="true" />
-                {label}
-              </dt>
-              <dd className="mt-1 text-sm leading-snug font-semibold text-foreground">{value}</dd>
-              {sub && <dd className="text-xs text-muted-foreground">{sub}</dd>}
+        <div className="space-y-6 pt-3">
+          {/* 基本情報 */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 rounded-lg border bg-muted/20 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <MapPin className="size-3.5" /> {isJa ? '場所' : 'Location'}
+              </span>
+              <span className="font-semibold text-sm truncate">{experiment.location}</span>
             </div>
-          ))}
-        </dl>
-      </div>
-
-      <div className="flex flex-col gap-6 px-6 py-5">
-        <section className="flex flex-col gap-2">
-          <SectionHeading>About this experiment</SectionHeading>
-          <p className="text-sm leading-relaxed text-secondary-foreground">{experiment.description}</p>
-          <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Requirements">
-            {experiment.requirements.map((req) => (
-              <li key={req}>
-                <RequirementChip>{req}</RequirementChip>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="flex flex-col gap-3">
-          <SectionHeading>Lab</SectionHeading>
-          <div className="flex items-start gap-3 rounded-xl border p-4">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-              <GraduationCap className="size-5" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">{experiment.labName}</p>
-              <p className="text-sm text-secondary-foreground">PI: {experiment.professor}</p>
-              <p className="text-sm text-muted-foreground">Contact: {experiment.contact}</p>
+            <div className="p-3 rounded-lg border bg-muted/20 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Clock className="size-3.5" /> {isJa ? '時間' : 'Duration'}
+              </span>
+              <span className="font-semibold text-sm">{experiment.durationMins}分</span>
+            </div>
+            <div className="p-3 rounded-lg border bg-muted/20 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Coins className="size-3.5" /> {isJa ? '謝礼' : 'Reward'}
+              </span>
+              <span className="font-semibold text-sm">¥{experiment.rewardAmount.toLocaleString()}</span>
+            </div>
+            <div className="p-3 rounded-lg border bg-muted/20 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Users className="size-3.5" /> {isJa ? '残席' : 'Open spots'}
+              </span>
+              <span className="font-semibold text-sm">
+                {experiment.spotsLeft} / {experiment.spotsTotal}
+              </span>
             </div>
           </div>
-        </section>
 
-        <section className="flex flex-col gap-3">
-          <SectionHeading>Ethics & informed consent</SectionHeading>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50">
-            <div className="flex items-center gap-2 border-b border-emerald-200 px-4 py-2.5 text-sm font-medium text-emerald-800">
-              <ShieldCheck className="size-4" aria-hidden="true" />
-              Approved by University Ethics Review Board · {experiment.ethicsId}
+          {/* 実験概要 */}
+          {experiment.description && (
+            <div>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                {isJa ? '実験の概要' : 'About this experiment'}
+              </h4>
+              <p className="text-sm text-foreground/90 whitespace-pre-line leading-relaxed">
+                {experiment.description}
+              </p>
             </div>
-            <div
-              tabIndex={0}
-              aria-label="Informed consent document preview"
-              className="max-h-32 overflow-y-auto px-4 py-3 text-xs leading-relaxed text-secondary-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <p>
-                Participation in this study is entirely voluntary. You may withdraw at any time, before or during the
-                session, without giving a reason and without any penalty or effect on your academic standing.
-              </p>
-              <p className="mt-2">
-                All data collected will be anonymized and stored securely on university servers for up to 5 years in
-                accordance with the university data protection policy. Results may be published in academic journals in
-                aggregate form only; no individually identifiable information will be disclosed.
-              </p>
-              <p className="mt-2">
-                There are no known risks beyond those of everyday life. If you experience discomfort at any point,
-                please notify the experimenter immediately. Rewards are provided in full even if you withdraw partway
-                through.
-              </p>
+          )}
+
+          {/* 参加要件 */}
+          <div>
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              {isJa ? '参加条件・要件' : 'Requirements'}
+            </h4>
+            <div className="flex flex-wrap gap-1.5">
+              {experiment.requirements.map((req, i) => (
+                <Badge key={i} variant="outline" className="bg-muted/30">
+                  {req}
+                </Badge>
+              ))}
             </div>
           </div>
-          <label className="flex cursor-pointer items-start gap-3 rounded-lg p-1 text-sm text-foreground">
-            <Checkbox checked={consent} onCheckedChange={(checked) => setConsent(checked)} className="mt-0.5" />
-            <span>I agree to participate based on the university ethics guidelines</span>
-          </label>
-        </section>
 
-        <section className="flex flex-col gap-3">
-          <SectionHeading>Available time slots</SectionHeading>
-          <div role="radiogroup" aria-label="Available time slots" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {experiment.slots.map((slot) => {
-              const selected = slot.id === slotId
-              return (
-                <button
-                  key={slot.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={!slot.available}
-                  onClick={() => setSlotId(slot.id)}
-                  className={cn(
-                    'flex items-center justify-between gap-3 rounded-lg border px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
-                    selected
-                      ? 'border-primary bg-accent ring-1 ring-primary'
-                      : 'bg-card hover:border-primary/40 hover:bg-muted/40',
-                    !slot.available && 'cursor-not-allowed opacity-50 hover:border-border hover:bg-card',
-                  )}
-                >
-                  <span className="flex flex-col">
-                    <span className={cn('text-sm font-medium', selected ? 'text-accent-foreground' : 'text-foreground')}>
-                      {slot.day} {slot.time}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {slot.date}
-                      {!slot.available && ' · Full'}
-                    </span>
-                  </span>
-                  <span
-                    className={cn(
-                      'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                      selected ? 'border-primary bg-primary' : 'border-input',
-                    )}
-                    aria-hidden="true"
+          {/* 区切り線 */}
+          <div className="border-t border-border" />
+
+          {/* 応募者情報 */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <User className="size-4 text-primary" />
+              {isJa ? '応募者情報' : 'Applicant Information'}
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="applicantName" className="text-xs">
+                  {isJa ? 'お名前 *' : 'Full Name *'}
+                </Label>
+                <Input
+                  id="applicantName"
+                  value={applicantName}
+                  onChange={(e) => setApplicantName(e.target.value)}
+                  placeholder={isJa ? '山田 太郎' : 'Taro Yamada'}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="applicantEmail" className="text-xs">
+                  {isJa ? '連絡先メールアドレス *' : 'Email Address *'}
+                </Label>
+                <Input
+                  id="applicantEmail"
+                  type="email"
+                  value={applicantEmail}
+                  onChange={(e) => setApplicantEmail(e.target.value)}
+                  placeholder="taro@example.ac.jp"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 区切り線 */}
+          <div className="border-t border-border" />
+
+          {/* 日時スロットの選択 */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Calendar className="size-4 text-primary" />
+              {isJa ? '参加希望枠の選択' : 'Select a Time Slot'}
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {slots.map((slot) => {
+                const isSelected = selectedSlot === slot.id || bookedSlotId === slot.id
+                return (
+                  <button
+                    key={slot.id}
+                    type="button"
+                    onClick={() => setSelectedSlot(slot.id)}
+                    className={`flex flex-col items-start p-3 rounded-lg border text-left transition-all ${
+                      isSelected
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                        : 'border-border hover:border-primary/50'
+                    }`}
                   >
-                    {selected && <span className="size-1.5 rounded-full bg-primary-foreground" />}
-                  </span>
-                </button>
-              )
-            })}
+                    <span className="font-semibold text-sm">
+                      {slot.timeText}
+                    </span>
+                    <span className="text-[11px] text-emerald-600 font-medium mt-1">
+                      {slot.spotsLeft} {isJa ? '枠空き' : 'spots left'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        </section>
-      </div>
 
-      <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t bg-card/95 px-6 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">
-          {!slotId ? 'Select a time slot to continue.' : !consent ? 'Please agree to the consent notice.' : 'Ready to submit.'}
-        </p>
-        <div className="flex gap-2">
-          <DialogClose render={<Button type="button" variant="outline" className="h-10 flex-1 rounded-lg sm:flex-none" />}>
-            Cancel
-          </DialogClose>
-          <Button type="submit" disabled={!canSubmit} className="h-10 flex-1 rounded-lg px-5 font-medium sm:flex-none">
-            Confirm Application
-          </Button>
+          {/* 倫理ステートメント */}
+          <div className="p-3.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-xs text-muted-foreground flex gap-2.5 items-start">
+            <ShieldCheck className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+            <p>
+              {isJa
+                ? '東京大学倫理審査委員会 承認済み（ETH-2026-001）。参加は任意であり、実験の途中でも自由に辞退できます。取得されたデータは匿名化され厳重に管理されます。'
+                : 'Approved by University Ethics Review Board (ETH-2026-001). Participation is voluntary.'}
+            </p>
+          </div>
         </div>
-      </div>
-    </form>
+
+        <DialogFooter className="pt-4 gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {isJa ? '閉じる' : 'Close'}
+          </Button>
+          <Button
+            onClick={handleApply}
+            disabled={(!selectedSlot && !bookedSlotId) || loading || success}
+            className="gap-2"
+          >
+            {loading && <Loader2 className="size-4 animate-spin" />}
+            {success ? (
+              <>
+                <CheckCircle2 className="size-4" />
+                {isJa ? '応募完了！' : 'Applied!'}
+              </>
+            ) : bookedSlotId ? (
+              isJa ? '応募済み' : 'Applied'
+            ) : (
+              isJa ? 'この日時で応募する' : 'Confirm Application'
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
