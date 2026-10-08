@@ -1,13 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CalendarCheck, FlaskConical, SearchX, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TopNav } from '@/components/labomate/top-nav'
 import { ExperimentCard } from '@/components/labomate/experiment-card'
 import { ExperimentDialog } from '@/components/labomate/experiment-dialog'
-import { EXPERIMENTS, FILTERS, formatYen, matchesFilter, type Experiment, type ExperimentCategory, type FilterId } from '@/lib/experiments'
-import { supabase } from '@/lib/supabase'
+import { EXPERIMENTS, FILTERS, formatYen, matchesFilter, type Experiment, type FilterId } from '@/lib/experiments'
 
 export function Dashboard() {
   const [query, setQuery] = useState('')
@@ -15,64 +14,10 @@ export function Dashboard() {
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [bookings, setBookings] = useState<Record<string, string>>({})
-  const [experiments, setExperiments] = useState<Experiment[]>(EXPERIMENTS)
-
-  // Supabaseから本物のデータを取得
-  useEffect(() => {
-    async function fetchExperiments() {
-      try {
-        const { data, error } = await supabase
-          .from('experiments')
-          .select('*')
-          .order('created_at', { ascending: false })
-
-        if (error) {
-          console.error('Supabase fetch error:', error)
-          return
-        }
-
-        if (data && data.length > 0) {
-          const mapped: Experiment[] = data.map((item: any) => {
-            const isOnline = item.format?.includes('オンライン') || item.format?.includes('online')
-            let category: ExperimentCategory = 'Cognitive Psychology'
-            if (item.field?.includes('経済')) category = 'Behavioral Economics'
-            else if (item.field?.includes('VR') || item.field?.includes('視線')) category = 'VR / Eye-Tracking'
-            else if (isOnline) category = 'Online Survey'
-
-            return {
-              id: item.id,
-              title: item.title || '無題の実験',
-              category: category,
-              department: item.field || '認知心理学専攻',
-              location: item.location || (isOnline ? 'オンライン' : '実験室'),
-              mode: isOnline ? 'online' : 'in-person',
-              durationMins: parseInt(item.duration) || 45,
-              rewardAmount: Number(item.reward_amount) || 1000,
-              rewardType: item.reward_type || 'Amazonギフト券',
-              spotsLeft: Number(item.max_participants) || 5,
-              spotsTotal: Number(item.max_participants) || 10,
-              requirements: item.requirements ? [item.requirements] : ['学内生限定'],
-              description: item.description || '',
-              labName: '認知科学研究室',
-              professor: '佐藤 教授',
-              contact: 'lab@labomate.example.ac.jp',
-              ethicsId: 'ETH-2026-001',
-              slots: [],
-            }
-          })
-          setExperiments([...mapped, ...EXPERIMENTS])
-        }
-      } catch (err) {
-        console.error('Error fetching experiments:', err)
-      }
-    }
-
-    fetchExperiments()
-  }, [])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return experiments.filter((exp) => {
+    return EXPERIMENTS.filter((exp) => {
       if (!matchesFilter(exp, filter)) return false
       if (!q) return true
       return [exp.title, exp.department, exp.location, exp.category, exp.labName, ...exp.requirements]
@@ -80,12 +25,10 @@ export function Dashboard() {
         .toLowerCase()
         .includes(q)
     })
-  }, [query, filter, experiments])
+  }, [query, filter])
 
   const bookedIds = Object.keys(bookings)
-  const pendingRewards = experiments
-    .filter((e) => bookedIds.includes(e.id))
-    .reduce((sum, e) => sum + e.rewardAmount, 0)
+  const pendingRewards = EXPERIMENTS.filter((e) => bookedIds.includes(e.id)).reduce((sum, e) => sum + e.rewardAmount, 0)
   const filterLabel = FILTERS.find((f) => f.id === filter)?.label
 
   const openExperiment = (exp: Experiment) => {
@@ -100,7 +43,7 @@ export function Dashboard() {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <section aria-label="Your activity" className="grid grid-cols-3 gap-2 sm:gap-3">
           {[
-            { icon: FlaskConical, label: 'Open experiments', value: experiments.length.toString(), tone: 'bg-accent text-accent-foreground' },
+            { icon: FlaskConical, label: 'Open experiments', value: EXPERIMENTS.length.toString(), tone: 'bg-accent text-accent-foreground' },
             { icon: CalendarCheck, label: 'Your upcoming sessions', value: bookedIds.length.toString(), tone: 'bg-emerald-50 text-emerald-700' },
             { icon: Wallet, label: 'Pending rewards', value: formatYen(pendingRewards), tone: 'bg-amber-50 text-amber-700' },
           ].map(({ icon: Icon, label, value, tone }) => (
@@ -124,7 +67,7 @@ export function Dashboard() {
             <p className="mt-1 text-sm text-muted-foreground">
               {visible.length} {visible.length === 1 ? 'study' : 'studies'}
               {filter !== 'all' && ` · ${filterLabel}`}
-              {query.trim() && ` · matching "${query.trim()}"`}
+              {query.trim() && ` · matching “${query.trim()}”`}
             </p>
           </div>
         </div>
@@ -132,12 +75,7 @@ export function Dashboard() {
         {visible.length > 0 ? (
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {visible.map((exp) => (
-              <ExperimentCard
-                key={exp.id}
-                experiment={exp}
-                applied={exp.id in bookings}
-                onOpen={openExperiment}
-              />
+              <ExperimentCard key={exp.id} experiment={exp} applied={exp.id in bookings} onOpen={openExperiment} />
             ))}
           </div>
         ) : (
@@ -164,9 +102,7 @@ export function Dashboard() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         bookedSlotId={selected ? bookings[selected.id] : undefined}
-        onConfirm={(experimentId, slotId) =>
-          setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
-        }
+        onConfirm={(experimentId, slotId) => setBookings((prev) => ({ ...prev, [experimentId]: slotId }))}
       />
     </div>
   )
