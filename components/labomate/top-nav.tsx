@@ -14,10 +14,21 @@ interface TopNavProps {
   filter: FilterId
   onFilterChange: (filter: FilterId) => void
   onOpenCreateModal?: () => void
+  onOpenProfileModal?: () => void
+  userName?: string
 }
 
-export function TopNav({ query, onQueryChange, onOpenCreateModal }: TopNavProps) {
+export function TopNav({
+  query,
+  onQueryChange,
+  onOpenCreateModal,
+  onOpenProfileModal,
+  userName = '周誠',
+}: TopNavProps) {
   const { language, toggleLanguage, t } = useLanguage()
+
+  // 名前のイニシャル（2文字）を生成
+  const initials = userName.trim().slice(0, 2).toUpperCase() || 'LM'
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -30,7 +41,10 @@ export function TopNav({ query, onQueryChange, onOpenCreateModal }: TopNavProps)
             </div>
             <span className="font-bold text-xl tracking-tight hidden sm:inline-block">Labomate</span>
           </div>
-          <Badge variant="secondary" className="text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800">
+          <Badge
+            variant="secondary"
+            className="text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+          >
             {t('verifiedBadge')}
           </Badge>
         </div>
@@ -76,10 +90,19 @@ export function TopNav({ query, onQueryChange, onOpenCreateModal }: TopNavProps)
             <Bell className="h-4 w-4" />
           </Button>
 
-          {/* ユーザーアバター */}
-          <Avatar className="h-8 w-8 cursor-pointer ring-1 ring-border">
-            <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">YS</AvatarFallback>
-          </Avatar>
+          {/* ユーザーアバター（クリックでプロフィール画面を開く） */}
+          <button
+            type="button"
+            onClick={onOpenProfileModal}
+            className="rounded-full ring-offset-background transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            title="プロフィール設定 / Profile Settings"
+          >
+            <Avatar className="h-9 w-9 cursor-pointer ring-1 ring-border shadow-sm">
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+          </button>
         </div>
       </div>
     </header>

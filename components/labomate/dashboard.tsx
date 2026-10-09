@@ -8,6 +8,7 @@ import { TopNav } from '@/components/labomate/top-nav'
 import { ExperimentCard } from '@/components/labomate/experiment-card'
 import { ExperimentDialog } from '@/components/labomate/experiment-dialog'
 import { CreateExperimentDialog } from '@/components/labomate/create-experiment-dialog'
+import { ProfileDialog, type UserProfile } from '@/components/labomate/profile-dialog'
 import { EXPERIMENTS, FILTERS, formatYen, matchesFilter, type Experiment, type ExperimentCategory, type FilterId } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
 
@@ -18,8 +19,29 @@ export function Dashboard() {
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false)
   const [bookings, setBookings] = useState<Record<string, string>>({})
   const [experiments, setExperiments] = useState<Experiment[]>(EXPERIMENTS)
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    name: '周誠',
+    email: 'shusei@example.com',
+    department: '認知科学研究科',
+    grade: 'M1',
+    dominantHand: '右利き',
+    vision: '裸眼',
+  })
+
+  // 保存済みプロフィールの初回読み込み
+  useEffect(() => {
+    const cached = localStorage.getItem('labomate_user_profile')
+    if (cached) {
+      try {
+        setUserProfile(JSON.parse(cached))
+      } catch (e) {
+        console.error(e)
+      }
+    }
+  }, [])
 
   // Supabaseから最新データを取得
   const fetchExperiments = useCallback(async () => {
@@ -105,6 +127,8 @@ export function Dashboard() {
         filter={filter}
         onFilterChange={setFilter}
         onOpenCreateModal={() => setCreateDialogOpen(true)}
+        onOpenProfileModal={() => setProfileDialogOpen(true)}
+        userName={userProfile.name}
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -186,6 +210,15 @@ export function Dashboard() {
         onOpenChange={setCreateDialogOpen}
         onSuccess={() => {
           fetchExperiments()
+        }}
+      />
+
+      {/* プロフィール設定モーダル */}
+      <ProfileDialog
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
+        onSave={(updated) => {
+          setUserProfile(updated)
         }}
       />
     </div>
