@@ -105,7 +105,8 @@ export function CreateExperimentDialog({
       const insertPayload = {
         title: title.trim(),
         category,
-        department,
+        field: department.trim() || '認知科学研究室', // ← ここを追加！
+        department: department.trim() || '認知科学研究室',
         lab_name: labName,
         professor: professor.trim() || '指導教員',
         contact: contact.trim() || 'contact@keio.jp',
