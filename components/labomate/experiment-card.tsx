@@ -1,99 +1,163 @@
 'use client'
 
-import { ArrowRight, CheckCircle2, Clock, MapPin, Users, Wallet } from 'lucide-react'
+import { useState } from 'react'
+import { useLanguage } from '@/lib/language-context'
+import {
+  Clock,
+  Coins,
+  MapPin,
+  Building2,
+  Globe2,
+  GraduationCap,
+} from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { formatYen, isFewSpotsLeft, type Experiment } from '@/lib/experiments'
-import { CategoryBadge, RequirementChip, StatusBadge } from '@/components/labomate/experiment-badges'
+import { formatYen, type Experiment } from '@/lib/experiments'
+import { KeioGuardDialog } from './keio-guard-dialog'
 
-type ExperimentCardProps = {
+interface ExperimentCardProps {
   experiment: Experiment
-  applied: boolean
-  onOpen: (experiment: Experiment) => void
+  // onSelect または onOpen のどちらでも受け取れるように定義
+  onSelect?: (experiment: Experiment) => void
+  onOpen?: (experiment: Experiment) => void
+  // applied または isApplied のどちらでも受け取れるように定義
+  applied?: boolean
+  isApplied?: boolean
 }
 
-function MetaItem({ icon: Icon, label, children }: { icon: typeof MapPin; label: string; children: React.ReactNode }) {
+const PROFILE_STORAGE_KEY = 'labomate_user_profile'
+
+export function ExperimentCard({
+  experiment,
+  onSelect,
+  onOpen,
+  applied,
+  isApplied,
+}: ExperimentCardProps) {
+  const { language } = useLanguage()
+  const isJa = language === 'ja'
+
+  const [guardOpen, setGuardOpen] = useState(false)
+  const isAlreadyApplied = Boolean(applied ?? isApplied)
+
+  // 慶應生限定フラグ（条件に「慶應」が含まれる、または対面実験の場合）
+  const isKeioOnly =
+    experiment.requirements.some((r) => r.includes('慶應') || r.includes('Keio')) ||
+    experiment.mode === 'in-person'
+
+  // クリック時の判定
+  const handleClick = () => {
+    // プロフィールの認証状況をチェック
+    let isKeioVerified = false
+    try {
+      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        isKeioVerified = Boolean(parsed.isUniversityVerified)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+
+    // 慶應生限定なのに未認証ならガードを開く
+    if (isKeioOnly && !isKeioVerified) {
+      setGuardOpen(true)
+      return
+    }
+
+    if (onSelect) onSelect(experiment)
+    if (onOpen) onOpen(experiment)
+  }
+
   return (
-    <div className="flex min-w-0 items-start gap-2">
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <dt className="sr-only">{label}</dt>
-      <dd className="min-w-0 text-sm leading-snug text-secondary-foreground">{children}</dd>
-    </div>
-  )
-}
-
-export function ExperimentCard({ experiment, applied, onOpen }: ExperimentCardProps) {
-  const few = isFewSpotsLeft(experiment)
-  const filledPct = Math.round(((experiment.spotsTotal - experiment.spotsLeft) / experiment.spotsTotal) * 100)
-
-  return (
-    <article className="group flex flex-col rounded-xl border bg-card p-5 shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge experiment={experiment} />
-        <CategoryBadge category={experiment.category} />
-      </div>
-
-      <h3 className="mt-3 text-base leading-snug font-semibold text-pretty text-foreground">{experiment.title}</h3>
-      <p className="mt-1 text-xs text-muted-foreground">{experiment.department}</p>
-
-      <dl className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-        <MetaItem icon={MapPin} label="Location">
-          {experiment.location}
-        </MetaItem>
-        <MetaItem icon={Clock} label="Duration">
-          {experiment.durationMins} mins
-        </MetaItem>
-        <MetaItem icon={Wallet} label="Reward">
-          <span className="font-semibold text-foreground">{formatYen(experiment.rewardAmount)}</span>{' '}
-          <span className="text-muted-foreground">({experiment.rewardType})</span>
-        </MetaItem>
-        <MetaItem icon={Users} label="Open spots">
-          <span className={cn('font-medium', few ? 'text-amber-700' : 'text-foreground')}>
-            {experiment.spotsLeft} / {experiment.spotsTotal}
-          </span>{' '}
-          spots left
-        </MetaItem>
-      </dl>
-
+    <>
       <div
-        className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-label="Spots filled"
-        aria-valuenow={filledPct}
-        aria-valuemin={0}
-        aria-valuemax={100}
+        onClick={handleClick}
+        className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-border/70 bg-card p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md cursor-pointer"
       >
-        <div
-          className={cn('h-full rounded-full', few ? 'bg-amber-500' : 'bg-emerald-500')}
-          style={{ width: `${filledPct}%` }}
-        />
-      </div>
+        <div className="space-y-3">
+          {/* バッジ行 */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge
+              variant={experiment.mode === 'in-person' ? 'default' : 'secondary'}
+              className="text-[10px] px-2 py-0.5 font-semibold"
+            >
+              {experiment.mode === 'in-person' ? (
+                <span className="flex items-center gap-1">
+                  <Building2 className="size-3" /> 学内対面
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <Globe2 className="size-3" /> オンライン
+                </span>
+              )}
+            </Badge>
 
-      <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="Requirements">
-        {experiment.requirements.map((req) => (
-          <li key={req}>
-            <RequirementChip>{req}</RequirementChip>
-          </li>
-        ))}
-      </ul>
+            {isKeioOnly && (
+              <Badge
+                variant="outline"
+                className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0 font-medium flex items-center gap-1"
+              >
+                <GraduationCap className="size-3" />
+                慶應生限定
+              </Badge>
+            )}
 
-      <div className="mt-auto pt-5">
-        {applied ? (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+              {experiment.department}
+            </Badge>
+          </div>
+
+          {/* タイトル */}
+          <h3 className="text-base font-bold text-foreground leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+            {experiment.title}
+          </h3>
+
+          {/* 実験情報 */}
+          <div className="space-y-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <MapPin className="size-3.5 text-primary/70 shrink-0" />
+              <span className="truncate">{experiment.location}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Clock className="size-3.5 text-primary/70 shrink-0" />
+              <span>所要時間: 約{experiment.durationMins}分</span>
+            </div>
+          </div>
+        </div>
+
+        {/* フッター：謝礼・コイン・応募ボタン */}
+        <div className="mt-5 pt-3.5 border-t border-border/60 flex items-center justify-between">
+          <div>
+            <div className="text-base font-extrabold text-foreground tracking-tight">
+              {formatYen(experiment.rewardAmount)}
+            </div>
+            <div className="text-[11px] font-semibold text-amber-600 flex items-center gap-1">
+              <Coins className="size-3" />
+              <span>+{experiment.mode === 'in-person' ? 100 : 20} LC</span>
+            </div>
+          </div>
+
           <Button
-            variant="outline"
-            className="h-10 w-full gap-2 rounded-lg border-emerald-200 bg-emerald-50 font-medium text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
-            onClick={() => onOpen(experiment)}
+            size="sm"
+            variant={isAlreadyApplied ? 'outline' : 'default'}
+            className="h-8 text-xs font-bold px-3 shadow-xs"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleClick()
+            }}
           >
-            <CheckCircle2 className="size-4" aria-hidden="true" />
-            Applied — View Booking
+            {isAlreadyApplied ? (isJa ? '応募済み' : 'Applied') : (isJa ? '参加する' : 'Join')}
           </Button>
-        ) : (
-          <Button className="h-10 w-full gap-2 rounded-lg font-medium" onClick={() => onOpen(experiment)}>
-            View Details & Apply
-            <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-          </Button>
-        )}
+        </div>
       </div>
-    </article>
+
+      {/* 慶應生限定ガードモーダル */}
+      <KeioGuardDialog
+        open={guardOpen}
+        onOpenChange={setGuardOpen}
+        studyTitle={experiment.title}
+      />
+    </>
   )
 }
