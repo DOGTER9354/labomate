@@ -102,17 +102,15 @@ export function CreateExperimentDialog({
 
     try {
       // id は渡さず Supabase 側で UUID を自動生成させる
-      const insertPayload = {
+      const spotsCount = mode === 'online' ? 50 : slots.length
+
+      const insertPayload: Record<string, any> = {
         title: title.trim(),
         category,
-        // 旧・新カラム名の両方に対応
         field: department.trim() || '認知科学研究室',
         department: department.trim() || '認知科学研究室',
-        lab: labName.trim() || 'インタラクション研究室',
         lab_name: labName.trim() || 'インタラクション研究室',
-        duration: `${durationMins}分`,
         duration_mins: Number(durationMins),
-        reward: `¥${Number(rewardAmount).toLocaleString()}`,
         reward_amount: Number(rewardAmount),
         reward_type: rewardType,
         professor: professor.trim() || '指導教員',
@@ -123,8 +121,9 @@ export function CreateExperimentDialog({
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
         completion_code: mode === 'online' ? completionCode.trim() : null,
         is_keio_only: isKeioOnly,
-        spots_left: mode === 'online' ? 50 : slots.length,
-        spots_total: mode === 'online' ? 50 : slots.length,
+        spots_left: spotsCount,
+        spots_total: spotsCount,
+        max_participants: spotsCount, // ← max_participants を追加！
         requirements: isKeioOnly ? ['慶應義塾大学の学生・院生'] : ['大学生・大学院生'],
       }
 
