@@ -1,6 +1,7 @@
 'use client'
 
-import { Search, Plus, Bell, Globe } from 'lucide-react'
+import Link from 'next/link'
+import { Search, Plus, Bell, Globe, ShoppingBag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +15,6 @@ interface TopNavProps {
   filter: FilterId
   onFilterChange: (filter: FilterId) => void
   onOpenCreateModal?: () => void
-  onOpenProfileModal?: () => void
   userName?: string
 }
 
@@ -22,12 +22,9 @@ export function TopNav({
   query,
   onQueryChange,
   onOpenCreateModal,
-  onOpenProfileModal,
   userName = '周誠',
 }: TopNavProps) {
   const { language, toggleLanguage, t } = useLanguage()
-
-  // 名前のイニシャル（2文字）を生成
   const initials = userName.trim().slice(0, 2).toUpperCase() || 'LM'
 
   return (
@@ -35,12 +32,12 @@ export function TopNav({
       <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
         {/* ロゴ & 大学バッジ */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold text-lg shadow-sm">
               LM
             </div>
             <span className="font-bold text-xl tracking-tight hidden sm:inline-block">Labomate</span>
-          </div>
+          </Link>
           <Badge
             variant="secondary"
             className="text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
@@ -65,6 +62,13 @@ export function TopNav({
 
         {/* アクションボタン群 */}
         <div className="flex items-center gap-2">
+          {/* ショップへのリンク */}
+          <Link href="/shop" title="アイテムショップ / Shop">
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-primary">
+              <ShoppingBag className="h-4 w-4" />
+            </Button>
+          </Link>
+
           {/* 言語切り替えトグル (JP / EN) */}
           <Button
             variant="outline"
@@ -90,10 +94,9 @@ export function TopNav({
             <Bell className="h-4 w-4" />
           </Button>
 
-          {/* ユーザーアバター（クリックでプロフィール画面を開く） */}
-          <button
-            type="button"
-            onClick={onOpenProfileModal}
+          {/* ユーザーアバター（プロフィールページへ移動） */}
+          <Link
+            href="/profile"
             className="rounded-full ring-offset-background transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             title="プロフィール設定 / Profile Settings"
           >
@@ -102,7 +105,7 @@ export function TopNav({
                 {initials}
               </AvatarFallback>
             </Avatar>
-          </button>
+          </Link>
         </div>
       </div>
     </header>
