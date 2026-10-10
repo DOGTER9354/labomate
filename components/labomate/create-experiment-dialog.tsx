@@ -101,9 +101,8 @@ export function CreateExperimentDialog({
     setIsSubmitting(true)
 
     try {
-      const expId = `exp-${Date.now()}`
-      const newExpRecord = {
-        id: expId,
+      // id は渡さず Supabase 側で UUID を自動生成させる
+      const insertPayload = {
         title: title.trim(),
         category,
         department,
@@ -124,7 +123,12 @@ export function CreateExperimentDialog({
         requirements: isKeioOnly ? ['慶應義塾大学の学生・院生'] : ['大学生・大学院生'],
       }
 
-      const { error } = await supabase.from('experiments').insert([newExpRecord])
+      // insert 後に作成されたレコード（生成された UUID を含む）を取得
+      const { data, error } = await supabase
+        .from('experiments')
+        .insert([insertPayload])
+        .select()
+        .single()
 
       if (error) {
         console.error('Failed to create experiment in Supabase:', error)
@@ -134,27 +138,27 @@ export function CreateExperimentDialog({
       }
 
       // クライアント側 Experiment 型へマッピングして通知
-      if (onCreated) {
+      if (onCreated && data) {
         const createdExp: Experiment = {
-          id: expId,
-          title: newExpRecord.title,
+          id: data.id,
+          title: data.title,
           category: category as any,
-          department: newExpRecord.department,
-          location: newExpRecord.location,
+          department: data.department,
+          location: data.location,
           mode,
-          durationMins: newExpRecord.duration_mins,
-          rewardAmount: newExpRecord.reward_amount,
-          rewardType: newExpRecord.reward_type,
-          spotsLeft: newExpRecord.spots_left,
-          spotsTotal: newExpRecord.spots_total,
-          requirements: newExpRecord.requirements,
-          description: newExpRecord.description,
-          labName: newExpRecord.lab_name,
-          professor: newExpRecord.professor,
-          contact: newExpRecord.contact,
+          durationMins: data.duration_mins,
+          rewardAmount: data.reward_amount,
+          rewardType: data.reward_type,
+          spotsLeft: data.spots_left,
+          spotsTotal: data.spots_total,
+          requirements: data.requirements || [],
+          description: data.description,
+          labName: data.lab_name,
+          professor: data.professor,
+          contact: data.contact,
           ethicsId: 'ETH-2026-PENDING',
-          surveyUrl: newExpRecord.survey_url || undefined,
-          completionCode: newExpRecord.completion_code || undefined,
+          surveyUrl: data.survey_url || undefined,
+          completionCode: data.completion_code || undefined,
           slots:
             mode === 'in-person'
               ? slots.map((s) => ({
