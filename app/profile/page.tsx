@@ -1,524 +1,317 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import { useState, useEffect, useCallback } from 'react'
 import {
   User,
-  Coins,
-  History,
-  ArrowLeft,
-  CalendarCheck,
-  CheckCircle2,
-  Clock,
   ShieldCheck,
-  Save,
-  ShoppingBag,
-  Hand,
-  Eye,
-  GraduationCap,
-  Sparkles,
-  AlertCircle,
+  Coins,
+  Wallet,
+  CalendarCheck,
+  Building2,
+  Globe2,
+  Clock,
+  LogOut,
+  Edit3,
+  Loader2,
+  CheckCircle2,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
+import { supabase } from '@/lib/supabase'
+import { ProfileDialog } from '@/components/labomate/profile-dialog'
 
-interface StoredProfile {
+const PROFILE_STORAGE_KEY = 'labomate_user_profile'
+
+interface UserProfile {
   name: string
   email: string
-  department: string
+  faculty: string
   grade: string
-  dominantHand: string
-  vision: string
+  studentId: string
   laboCoins: number
-  isUniversityVerified?: boolean
-  universityEmail?: string
-  universityName?: string
 }
 
-const STORAGE_KEY = 'labomate_user_profile'
+interface ApplicationHistory {
+  id: string
+  experiment_id: string
+  experiment_title: string
+  format: string
+  status: string
+  slot_time: string | null
+  applied_at: string
+}
 
 export default function ProfilePage() {
   const { language } = useLanguage()
   const isJa = language === 'ja'
 
-  const [activeTab, setActiveTab] = useState<'info' | 'history' | 'wallet'>('info')
-  const [profile, setProfile] = useState<StoredProfile>({
+  const [profile, setProfile] = useState<UserProfile>({
     name: '周誠',
-    email: 'shusei@example.com',
-    department: '環境情報学部',
-    grade: 'B3',
-    dominantHand: '右利き',
-    vision: '裸眼',
+    email: 'student@keio.jp',
+    faculty: '総合政策学部',
+    grade: '3年',
+    studentId: '72200000',
     laboCoins: 350,
-    isUniversityVerified: false,
-    universityEmail: '',
-    universityName: '',
   })
-  const [saved, setSaved] = useState(false)
 
-  // 大学認証用の入力フォーム状態
-  const [verifyEmail, setVerifyEmail] = useState('')
-  const [verifyStep, setVerifyStep] = useState<'input' | 'code' | 'done'>('input')
-  const [verifyCode, setVerifyCode] = useState('')
-  const [verifyError, setVerifyError] = useState<string | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [history, setHistory] = useState<ApplicationHistory[]>([])
+  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    const cached = localStorage.getItem(STORAGE_KEY)
-    if (cached) {
-      try {
+  // プロフィール情報の読み込み
+  const loadProfile = useCallback(() => {
+    try {
+      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
+      if (cached) {
         const parsed = JSON.parse(cached)
         setProfile((prev) => ({
           ...prev,
           ...parsed,
-          laboCoins: parsed.laboCoins ?? 350,
+          laboCoins: parsed.laboCoins ?? prev.laboCoins,
         }))
-        if (parsed.isUniversityVerified) {
-          setVerifyStep('done')
-        }
-      } catch (e) {
-        console.error(e)
       }
+    } catch (e) {
+      console.error(e)
     }
   }, [])
 
-  // 基本プロフィールの保存
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault()
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
+  // 参加履歴の取得
+  const fetchHistory = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('applications')
+        .select('*')
+        .or(`applicant_email.eq.${profile.email},applicant_name.eq.${profile.name}`)
+        .order('applied_at', { ascending: false })
 
-  // 大学認証メール送信（@keio.jp または @*.keio.jp をチェック）
-  const handleSendVerifyCode = (e: React.FormEvent) => {
-    e.preventDefault()
-    setVerifyError(null)
-
-    const emailTrimmed = verifyEmail.trim().toLowerCase()
-    const isKeioEmail = emailTrimmed.endsWith('@keio.jp') || emailTrimmed.includes('.keio.jp')
-
-    if (!isKeioEmail) {
-      setVerifyError(
-        isJa
-          ? '慶應義塾大学のメールアドレス（@keio.jp）を入力してください。'
-          : 'Please enter a valid Keio University email (@keio.jp).'
-      )
-      return
+      if (!error && data) {
+        setHistory(data)
+      }
+    } catch (e) {
+      console.error('Failed to load application history:', e)
+    } finally {
+      setLoading(false)
     }
+  }, [profile.email, profile.name])
 
-    setVerifyStep('code')
-  }
+  useEffect(() => {
+    loadProfile()
+  }, [loadProfile])
 
-  // 認証コード確認処理（4桁コードの入力で慶應バッジ付与）
-  const handleConfirmVerifyCode = (e: React.FormEvent) => {
-    e.preventDefault()
-    setVerifyError(null)
+  useEffect(() => {
+    fetchHistory()
+  }, [fetchHistory])
 
-    if (verifyCode.trim().length < 4) {
-      setVerifyError(isJa ? '4桁の認証コードを入力してください。' : 'Enter 4-digit code.')
-      return
+  // アカウントリセット（検証用）
+  const handleReset = () => {
+    if (window.confirm(isJa ? 'プロフィールの保存状態を初期化しますか？' : 'Reset profile data?')) {
+      localStorage.removeItem(PROFILE_STORAGE_KEY)
+      window.location.reload()
     }
-
-    const updatedProfile: StoredProfile = {
-      ...profile,
-      isUniversityVerified: true,
-      universityEmail: verifyEmail.trim(),
-      universityName: '慶應義塾大学',
-    }
-
-    setProfile(updatedProfile)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile))
-    setVerifyStep('done')
   }
 
   return (
-    <div className="min-h-dvh bg-background text-foreground">
-      {/* ナビゲーションバー */}
-      <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />
-            {isJa ? 'ダッシュボードに戻る' : 'Back to Dashboard'}
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link href="/shop">
-              <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 font-bold hover:bg-amber-500/20 cursor-pointer">
-                <Coins className="size-3.5 mr-1" />
-                {profile.laboCoins} Labo Coins
-              </Badge>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto max-w-4xl px-4 py-8">
-        {/* プロフィール概要ヘッダー */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pb-6 border-b">
-          <div className="size-16 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-2xl ring-2 ring-primary/20">
-            {profile.name.slice(0, 2).toUpperCase() || 'LM'}
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold">{profile.name}</h1>
-              {profile.isUniversityVerified ? (
-                <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 text-xs flex items-center gap-1 font-semibold">
-                  <ShieldCheck className="size-3.5" />
-                  慶應義塾大学 認証済み
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-xs text-muted-foreground">
-                  {isJa ? '一般メンバー (慶應未認証)' : 'Unverified'}
-                </Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {profile.department} · {profile.grade} · {profile.email}
+    <div className="min-h-dvh bg-background text-foreground pb-24">
+      {/* 画面ヘッダー */}
+      <header className="border-b bg-card/60 backdrop-blur sticky top-0 z-30 px-4 py-4 sm:px-8">
+        <div className="mx-auto max-w-4xl flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+              <User className="size-5 text-primary" />
+              <span>{isJa ? 'マイページ' : 'My Profile'}</span>
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isJa
+                ? 'アカウント情報や参加履歴の確認、プロフィールの管理ができます。'
+                : 'Manage your account credentials, verified status, and activity history.'}
             </p>
           </div>
 
-          <Link href="/shop">
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <ShoppingBag className="size-4 text-primary" />
-              {isJa ? 'アイテムショップを見る' : 'Visit Shop'}
-            </Button>
-          </Link>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsEditDialogOpen(true)}
+            className="h-8 text-xs font-bold gap-1.5"
+          >
+            <Edit3 className="size-3.5" />
+            <span>{isJa ? '編集' : 'Edit'}</span>
+          </Button>
         </div>
+      </header>
 
-        {/* タブ切り替えバー */}
-        <div className="mt-8 flex gap-2 border-b">
-          <button
-            type="button"
-            onClick={() => setActiveTab('info')}
-            className={`flex items-center gap-2 pb-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-              activeTab === 'info'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <User className="size-4" />
-            {isJa ? '基本情報 ＆ 慶應認証' : 'Account & Keio Verification'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('history')}
-            className={`flex items-center gap-2 pb-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-              activeTab === 'history'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <History className="size-4" />
-            {isJa ? '実験履歴' : 'Activity'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('wallet')}
-            className={`flex items-center gap-2 pb-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-              activeTab === 'wallet'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Coins className="size-4" />
-            {isJa ? '財布 ＆ コイン' : 'Wallet'}
-          </button>
-        </div>
-
-        {/* タブ1: 基本情報 ＆ 慶應認証 */}
-        {activeTab === 'info' && (
-          <div className="mt-6 space-y-6">
-            {/* === 慶應大学認証カード === */}
-            <div className="rounded-xl border bg-card p-6 shadow-sm">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-primary/10 text-primary">
-                    <GraduationCap className="size-6" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold flex items-center gap-2">
-                      {isJa ? '慶應義塾大学 認証バッジ（@keio.jp 認証）' : 'Keio University Badge'}
-                      {profile.isUniversityVerified && (
-                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
-                          認証完了
-                        </Badge>
-                      )}
-                    </h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {isJa
-                        ? '慶應義塾の公式メール（@keio.jp）を認証すると、慶應生限定の実験や調査に参加できるようになります。'
-                        : 'Verify your @keio.jp email to unlock campus-exclusive experiments.'}
-                    </p>
-                  </div>
-                </div>
+      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-8 space-y-6">
+        {/* プロフィール・認証カード */}
+        <section className="rounded-2xl border bg-card p-5 sm:p-6 shadow-xs relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary font-bold text-xl ring-2 ring-primary/20">
+                {profile.name.slice(0, 1) || '慶'}
               </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-bold text-foreground">
+                    {profile.name}
+                  </h2>
+                  <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] font-semibold flex items-center gap-1">
+                    <ShieldCheck className="size-3" />
+                    <span>慶應認証済み</span>
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {profile.faculty} · {profile.grade}
+                </p>
+                <p className="text-[11px] text-muted-foreground font-mono">
+                  {profile.email}
+                </p>
+              </div>
+            </div>
 
-              <div className="pt-4">
-                {profile.isUniversityVerified ? (
-                  <div className="flex items-center justify-between p-3.5 rounded-lg border bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200">
-                    <div className="flex items-center gap-2.5">
-                      <CheckCircle2 className="size-5 text-emerald-600" />
-                      <div>
-                        <p className="text-xs font-bold text-foreground">
-                          慶應義塾大学 認証済み
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">{profile.universityEmail}</p>
-                      </div>
+            <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center border-t sm:border-t-0 pt-3 sm:pt-0 gap-1.5">
+              <span className="text-[11px] text-muted-foreground">学籍番号</span>
+              <span className="font-mono text-xs font-bold text-foreground bg-muted/60 px-2.5 py-1 rounded-md">
+                {profile.studentId || '未登録'}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* スタッツサマリー */}
+        <section className="grid grid-cols-3 gap-2.5 sm:gap-4">
+          <div className="rounded-xl border bg-card p-3.5 sm:p-4 flex flex-col justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+              <CalendarCheck className="size-3.5 text-primary" />
+              <span>{isJa ? '参加申込数' : 'Total Applied'}</span>
+            </span>
+            <p className="text-lg sm:text-2xl font-bold text-foreground mt-2">
+              {history.length}
+              <span className="text-xs font-normal text-muted-foreground ml-1">件</span>
+            </p>
+          </div>
+
+          <div className="rounded-xl border bg-card p-3.5 sm:p-4 flex flex-col justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+              <Coins className="size-3.5 text-amber-500" />
+              <span>{isJa ? '保有コイン' : 'Labo Coins'}</span>
+            </span>
+            <p className="text-lg sm:text-2xl font-bold text-amber-600 dark:text-amber-400 mt-2">
+              {profile.laboCoins}
+              <span className="text-xs font-normal text-muted-foreground ml-1">LC</span>
+            </p>
+          </div>
+
+          <div className="rounded-xl border bg-card p-3.5 sm:p-4 flex flex-col justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+              <Wallet className="size-3.5 text-emerald-600" />
+              <span>{isJa ? 'ステータス' : 'Status'}</span>
+            </span>
+            <p className="text-xs sm:text-sm font-bold text-foreground mt-2 truncate">
+              被験者 / 研究者
+            </p>
+          </div>
+        </section>
+
+        {/* 参加履歴一覧 */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
+              <FileText className="size-4 text-primary" />
+              <span>{isJa ? '最近の参加・応募履歴' : 'Activity History'}</span>
+            </h3>
+            <span className="text-xs text-muted-foreground">{history.length} 件</span>
+          </div>
+
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-10 text-muted-foreground text-xs gap-2">
+              <Loader2 className="size-5 animate-spin" />
+              <span>{isJa ? '読み込み中...' : 'Loading...'}</span>
+            </div>
+          ) : history.length === 0 ? (
+            <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-1">
+              <p className="text-xs font-semibold text-foreground">
+                {isJa ? 'まだ参加履歴がありません' : 'No activity records yet'}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {isJa
+                  ? '「探す」タブから気になる実験に応募してみましょう！'
+                  : 'Explore and join lab studies to see your records here.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {history.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-xl border bg-card p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                >
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                        {item.format === 'オンライン' ? (
+                          <span className="flex items-center gap-1">
+                            <Globe2 className="size-3" /> オンライン
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            <Building2 className="size-3" /> 学内対面
+                          </span>
+                        )}
+                      </Badge>
+                      <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                        {item.status}
+                      </span>
                     </div>
-                    <Badge variant="outline" className="text-emerald-700 bg-emerald-100/50 text-[10px]">
-                      慶應生限定案件へアクセス可能
-                    </Badge>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {verifyError && (
-                      <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
-                        <AlertCircle className="size-4 shrink-0" />
-                        <span>{verifyError}</span>
-                      </div>
-                    )}
 
-                    {verifyStep === 'input' && (
-                      <form onSubmit={handleSendVerifyCode} className="space-y-3">
-                        <div className="space-y-1.5">
-                          <Label htmlFor="v-email" className="text-xs font-semibold">
-                            {isJa ? '慶應義塾公式メールアドレス (@keio.jp)' : 'Keio Email (@keio.jp)'}
-                          </Label>
-                          <div className="flex gap-2">
-                            <Input
-                              id="v-email"
-                              type="email"
-                              placeholder="shusei@keio.jp"
-                              value={verifyEmail}
-                              onChange={(e) => setVerifyEmail(e.target.value)}
-                              required
-                            />
-                            <Button type="submit" className="shrink-0 font-bold">
-                              {isJa ? '確認コードを送信' : 'Send Code'}
-                            </Button>
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {isJa
-                            ? '※ keio.jp ドメイン宛に確認用のコードをお送りします。'
-                            : 'A verification code will be sent to your @keio.jp address.'}
-                        </p>
-                      </form>
-                    )}
+                    <h4 className="text-xs sm:text-sm font-bold text-foreground leading-snug truncate">
+                      {item.experiment_title}
+                    </h4>
 
-                    {verifyStep === 'code' && (
-                      <form onSubmit={handleConfirmVerifyCode} className="space-y-3">
-                        <div className="space-y-1.5">
-                          <Label htmlFor="v-code" className="text-xs font-semibold">
-                            {isJa ? `${verifyEmail} に送信された4桁の確認コード` : '4-Digit Verification Code'}
-                          </Label>
-                          <div className="flex gap-2">
-                            <Input
-                              id="v-code"
-                              placeholder="例: 1234 (デモ用: 任意の4桁でOK)"
-                              value={verifyCode}
-                              onChange={(e) => setVerifyCode(e.target.value)}
-                              maxLength={6}
-                              required
-                            />
-                            <Button type="submit" className="shrink-0 font-bold bg-emerald-600 hover:bg-emerald-700 text-white">
-                              {isJa ? '認証を完了する' : 'Verify'}
-                            </Button>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setVerifyStep('input')}
-                          className="text-xs text-primary underline"
-                        >
-                          {isJa ? '← メールアドレスを再入力する' : 'Back to email input'}
-                        </button>
-                      </form>
+                    {item.slot_time && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Clock className="size-3 text-foreground/70" />
+                        <span>{item.slot_time}</span>
+                      </p>
                     )}
                   </div>
-                )}
-              </div>
-            </div>
 
-            {/* === プロフィール・属性情報フォーム === */}
-            <div className="rounded-xl border bg-card p-6 shadow-sm">
-              <div>
-                <h2 className="text-base font-bold">{isJa ? '基本属性情報' : 'Personal Details'}</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {isJa
-                    ? '実験応募時の条件スクリーニングや自動入力に使用されます。'
-                    : 'Used for automatic screening and experimental eligibility.'}
-                </p>
-              </div>
-
-              <form onSubmit={handleSave} className="space-y-4 mt-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="p-name">{isJa ? '氏名 *' : 'Name *'}</Label>
-                    <Input
-                      id="p-name"
-                      value={profile.name}
-                      onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="p-email">{isJa ? 'アカウントメール *' : 'Account Email *'}</Label>
-                    <Input
-                      id="p-email"
-                      type="email"
-                      value={profile.email}
-                      onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="p-dept">{isJa ? '所属学部・研究科' : 'Department'}</Label>
-                    <Input
-                      id="p-dept"
-                      value={profile.department}
-                      onChange={(e) => setProfile({ ...profile, department: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="p-grade">{isJa ? '学年' : 'Grade'}</Label>
-                    <Input
-                      id="p-grade"
-                      value={profile.grade}
-                      onChange={(e) => setProfile({ ...profile, grade: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="p-hand" className="flex items-center gap-1">
-                      <Hand className="size-3.5" />
-                      {isJa ? '利き手' : 'Dominant Hand'}
-                    </Label>
-                    <Input
-                      id="p-hand"
-                      value={profile.dominantHand}
-                      onChange={(e) => setProfile({ ...profile, dominantHand: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="p-vision" className="flex items-center gap-1">
-                      <Eye className="size-3.5" />
-                      {isJa ? '視力・矯正' : 'Vision'}
-                    </Label>
-                    <Input
-                      id="p-vision"
-                      value={profile.vision}
-                      onChange={(e) => setProfile({ ...profile, vision: e.target.value })}
-                    />
+                  <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 text-[10px] text-muted-foreground shrink-0">
+                    <span>
+                      応募日: {new Date(item.applied_at).toLocaleDateString('ja-JP')}
+                    </span>
                   </div>
                 </div>
-
-                <div className="flex justify-end pt-4">
-                  <Button type="submit" disabled={saved} className="gap-2">
-                    {saved ? (
-                      <>
-                        <CheckCircle2 className="size-4" />
-                        {isJa ? '保存しました！' : 'Saved!'}
-                      </>
-                    ) : (
-                      <>
-                        <Save className="size-4" />
-                        {isJa ? '変更を保存する' : 'Save Changes'}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </form>
+              ))}
             </div>
+          )}
+        </section>
+
+        {/* その他設定 & アクション */}
+        <section className="pt-4 border-t space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>慶應義塾大学 学内実証環境（SFC）</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleReset}
+              className="text-xs text-muted-foreground hover:text-destructive self-start sm:self-auto h-8 px-2"
+            >
+              <LogOut className="size-3.5 mr-1" />
+              <span>{isJa ? 'ローカルデータを初期化' : 'Reset Local Data'}</span>
+            </Button>
           </div>
-        )}
-
-        {/* タブ2: 実験履歴 */}
-        {activeTab === 'history' && (
-          <div className="mt-6 space-y-6">
-            <div className="rounded-xl border bg-card p-6 shadow-sm">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <CalendarCheck className="size-4 text-emerald-600" />
-                {isJa ? '参加予定・参加済みの実験' : 'Participated Experiments'}
-              </h2>
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between p-3.5 rounded-lg border bg-muted/20">
-                  <div>
-                    <p className="font-semibold text-sm">【視線計測】画面注視タスクと反応時間測定</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">日時: 10/12 10:00 - 10:45 · 謝礼: ¥1,500 + 100 LC</p>
-                  </div>
-                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                    {isJa ? '参加確定' : 'Confirmed'}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border bg-card p-6 shadow-sm">
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <Clock className="size-4 text-primary" />
-                {isJa ? 'あなたが募集した実験' : 'Your Posted Studies'}
-              </h2>
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between p-3.5 rounded-lg border bg-muted/20">
-                  <div>
-                    <p className="font-semibold text-sm">TEst</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">応募者: 2 / 10名 · 謝礼: ¥2,000</p>
-                  </div>
-                  <Badge variant="secondary" className="bg-primary/10 text-primary">
-                    {isJa ? '募集中' : 'Recruiting'}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* タブ3: 財布 ＆ コイン */}
-        {activeTab === 'wallet' && (
-          <div className="mt-6 space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="rounded-xl border bg-gradient-to-br from-amber-500/10 to-orange-500/5 border-amber-500/20 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium">{isJa ? '保有 Labo Coin' : 'Labo Coin Balance'}</p>
-                    <p className="text-3xl font-extrabold text-amber-600 mt-1">{profile.laboCoins} <span className="text-sm font-semibold">LC</span></p>
-                  </div>
-                  <div className="p-3 rounded-full bg-amber-500/20 text-amber-600">
-                    <Coins className="size-6" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">
-                    {isJa ? '※ 対面 +100 LC / オンライン +20 LC' : 'Earn LC by participating'}
-                  </p>
-                  <Link href="/shop">
-                    <Button size="sm" variant="outline" className="h-7 text-xs border-amber-500/30 text-amber-600 hover:bg-amber-500/10">
-                      {isJa ? 'ショップで使う →' : 'Use in Shop →'}
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-
-              <div className="rounded-xl border bg-card p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium">{isJa ? '受取予定の謝礼総額' : 'Pending Rewards'}</p>
-                    <p className="text-3xl font-extrabold text-foreground mt-1">¥3,500</p>
-                  </div>
-                  <div className="p-3 rounded-full bg-primary/10 text-primary">
-                    <Sparkles className="size-6" />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground mt-4">
-                  {isJa ? '※ 実験完了後にAmazonギフト券で自動支給' : 'Paid out automatically upon completion'}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        </section>
       </main>
+
+      {/* プロフィール編集モーダル */}
+      <ProfileDialog
+        open={isEditDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditDialogOpen(open)
+          if (!open) loadProfile()
+        }}
+      />
     </div>
   )
 }
