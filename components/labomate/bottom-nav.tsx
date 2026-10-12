@@ -25,7 +25,7 @@ export function BottomNav() {
     {
       href: '/manage',
       icon: ClipboardList,
-      label: isJa ? '募集管理' : 'Manage',
+      label: isJa ? '募集' : 'Recruit',
       isActive: pathname.startsWith('/manage'),
     },
     {
