@@ -1,163 +1,182 @@
 'use client'
 
-import { useState } from 'react'
-import { useLanguage } from '@/lib/language-context'
 import {
   Clock,
-  Coins,
   MapPin,
   Building2,
   Globe2,
-  GraduationCap,
+  Users,
+  CheckCircle2,
+  Flame,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useLanguage } from '@/lib/language-context'
 import { formatYen, type Experiment } from '@/lib/experiments'
-import { KeioGuardDialog } from './keio-guard-dialog'
 
 interface ExperimentCardProps {
   experiment: Experiment
-  // onSelect または onOpen のどちらでも受け取れるように定義
-  onSelect?: (experiment: Experiment) => void
-  onOpen?: (experiment: Experiment) => void
-  // applied または isApplied のどちらでも受け取れるように定義
   applied?: boolean
-  isApplied?: boolean
+  onOpen: (experiment: Experiment) => void
 }
-
-const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
 export function ExperimentCard({
   experiment,
-  onSelect,
+  applied = false,
   onOpen,
-  applied,
-  isApplied,
 }: ExperimentCardProps) {
   const { language } = useLanguage()
   const isJa = language === 'ja'
 
-  const [guardOpen, setGuardOpen] = useState(false)
-  const isAlreadyApplied = Boolean(applied ?? isApplied)
+  const total = experiment.spotsTotal || 10
+  const remaining = experiment.spotsLeft ?? total
+  const currentParticipants = Math.max(0, total - remaining)
+  const occupancyRate = Math.min(100, Math.round((currentParticipants / total) * 100))
 
-  // 慶應生限定フラグ（条件に「慶應」が含まれる、または対面実験の場合）
-  const isKeioOnly =
-    experiment.requirements.some((r) => r.includes('慶應') || r.includes('Keio')) ||
-    experiment.mode === 'in-person'
+  // 残りわずか判定（残り2枠以下、または残枠が30%以下）
+  const isAlmostFull = remaining > 0 && (remaining <= 2 || occupancyRate >= 70)
+  const isFullyBooked = remaining <= 0
 
-  // クリック時の判定
-  const handleClick = () => {
-    // プロフィールの認証状況をチェック
-    let isKeioVerified = false
-    try {
-      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        isKeioVerified = Boolean(parsed.isUniversityVerified)
-      }
-    } catch (e) {
-      console.error(e)
-    }
+  // 謝礼テキストの判定
+  const expAny = experiment as any
+  const rewardDisplayText =
+    typeof expAny.reward === 'string' && expAny.reward.trim() !== ''
+      ? expAny.reward
+      : experiment.rewardAmount > 0
+      ? formatYen(experiment.rewardAmount)
+      : '謝礼なし（ボランティア）'
 
-    // 慶應生限定なのに未認証ならガードを開く
-    if (isKeioOnly && !isKeioVerified) {
-      setGuardOpen(true)
-      return
-    }
-
-    if (onSelect) onSelect(experiment)
-    if (onOpen) onOpen(experiment)
-  }
+  const departmentDisplayText =
+    experiment.department || expAny.field || '認知科学研究室'
 
   return (
-    <>
-      <div
-        onClick={handleClick}
-        className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-border/70 bg-card p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md cursor-pointer"
-      >
-        <div className="space-y-3">
-          {/* バッジ行 */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge
-              variant={experiment.mode === 'in-person' ? 'default' : 'secondary'}
-              className="text-[10px] px-2 py-0.5 font-semibold"
-            >
-              {experiment.mode === 'in-person' ? (
-                <span className="flex items-center gap-1">
-                  <Building2 className="size-3" /> 学内対面
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <Globe2 className="size-3" /> オンライン
-                </span>
-              )}
-            </Badge>
-
-            {isKeioOnly && (
-              <Badge
-                variant="outline"
-                className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0 font-medium flex items-center gap-1"
-              >
-                <GraduationCap className="size-3" />
-                慶應生限定
-              </Badge>
+    <div className="flex flex-col justify-between overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xs transition-all hover:border-primary/50 hover:shadow-md">
+      {/* カードヘッダー */}
+      <div className="p-4 space-y-2 pb-3">
+        <div className="flex items-center justify-between gap-2">
+          {/* 形式バッジ */}
+          <Badge
+            variant={experiment.mode === 'in-person' ? 'default' : 'secondary'}
+            className="text-[10px] px-2 py-0.5 font-semibold"
+          >
+            {experiment.mode === 'in-person' ? (
+              <span className="flex items-center gap-1">
+                <Building2 className="size-3" /> 学内対面
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <Globe2 className="size-3" /> オンライン調査
+              </span>
             )}
+          </Badge>
 
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
-              {experiment.department}
+          {/* 残りわずか / 満席バッジ */}
+          {isFullyBooked ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-2 py-0.5 bg-muted text-muted-foreground border-border font-bold"
+            >
+              満席
             </Badge>
-          </div>
-
-          {/* タイトル */}
-          <h3 className="text-base font-bold text-foreground leading-snug line-clamp-2 group-hover:text-primary transition-colors">
-            {experiment.title}
-          </h3>
-
-          {/* 実験情報 */}
-          <div className="space-y-1.5 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <MapPin className="size-3.5 text-primary/70 shrink-0" />
-              <span className="truncate">{experiment.location}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="size-3.5 text-primary/70 shrink-0" />
-              <span>所要時間: 約{experiment.durationMins}分</span>
-            </div>
-          </div>
+          ) : isAlmostFull ? (
+            <Badge className="text-[10px] px-2 py-0.5 bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-bold flex items-center gap-1 animate-pulse">
+              <Flame className="size-3 text-rose-500" />
+              <span>残り {remaining} 枠！</span>
+            </Badge>
+          ) : (
+            <span className="text-[11px] text-muted-foreground font-medium">
+              残り {remaining} 枠
+            </span>
+          )}
         </div>
 
-        {/* フッター：謝礼・コイン・応募ボタン */}
-        <div className="mt-5 pt-3.5 border-t border-border/60 flex items-center justify-between">
-          <div>
-            <div className="text-base font-extrabold text-foreground tracking-tight">
-              {formatYen(experiment.rewardAmount)}
-            </div>
-            <div className="text-[11px] font-semibold text-amber-600 flex items-center gap-1">
-              <Coins className="size-3" />
-              <span>+{experiment.mode === 'in-person' ? 100 : 20} LC</span>
-            </div>
-          </div>
+        {/* タイトル */}
+        <h3
+          onClick={() => onOpen(experiment)}
+          className="font-bold text-sm leading-snug line-clamp-2 hover:text-primary cursor-pointer transition-colors"
+        >
+          {experiment.title}
+        </h3>
 
-          <Button
-            size="sm"
-            variant={isAlreadyApplied ? 'outline' : 'default'}
-            className="h-8 text-xs font-bold px-3 shadow-xs"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleClick()
-            }}
-          >
-            {isAlreadyApplied ? (isJa ? '応募済み' : 'Applied') : (isJa ? '参加する' : 'Join')}
-          </Button>
+        {/* 研究室・分野 */}
+        <p className="text-[11px] text-muted-foreground truncate">
+          {departmentDisplayText} · {experiment.labName || '研究室'}
+        </p>
+      </div>
+
+      {/* カードコンテンツ */}
+      <div className="px-4 space-y-3 pb-3">
+        {/* 実験情報スペック */}
+        <div className="flex flex-wrap items-center gap-y-1 gap-x-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Clock className="size-3.5 text-foreground/70" />
+            <span>約{experiment.durationMins}分</span>
+          </span>
+          <span className="flex items-center gap-1 truncate max-w-[180px]">
+            <MapPin className="size-3.5 text-foreground/70" />
+            <span>{experiment.location || 'キャンパス内'}</span>
+          </span>
+        </div>
+
+        {/* 募集進捗プログレスバー */}
+        <div className="space-y-1 pt-1">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Users className="size-3" />
+              <span>集まり状況</span>
+            </span>
+            <span className="font-bold text-foreground">
+              {currentParticipants} <span className="font-normal text-muted-foreground">/ {total}名</span>
+            </span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full transition-all duration-500 rounded-full ${
+                isFullyBooked
+                  ? 'bg-muted-foreground/60'
+                  : isAlmostFull
+                  ? 'bg-rose-500'
+                  : 'bg-primary'
+              }`}
+              style={{ width: `${occupancyRate}%` }}
+            />
+          </div>
         </div>
       </div>
 
-      {/* 慶應生限定ガードモーダル */}
-      <KeioGuardDialog
-        open={guardOpen}
-        onOpenChange={setGuardOpen}
-        studyTitle={experiment.title}
-      />
-    </>
+      {/* カードフッター */}
+      <div className="px-4 py-2.5 border-t flex items-center justify-between bg-muted/10">
+        <div>
+          <span className="text-[10px] text-muted-foreground block leading-none">謝礼</span>
+          <span className="text-sm font-bold text-foreground mt-0.5 block">
+            {rewardDisplayText}
+          </span>
+        </div>
+
+        <Button
+          size="sm"
+          variant={applied ? 'outline' : 'default'}
+          disabled={isFullyBooked && !applied}
+          onClick={() => onOpen(experiment)}
+          className={`h-8 text-xs font-bold ${
+            applied
+              ? 'border-emerald-600 text-emerald-600 bg-emerald-50/50'
+              : isFullyBooked
+              ? 'opacity-60'
+              : ''
+          }`}
+        >
+          {applied ? (
+            <span className="flex items-center gap-1">
+              <CheckCircle2 className="size-3.5" /> 応募済み
+            </span>
+          ) : isFullyBooked ? (
+            '満席'
+          ) : (
+            '詳細・参加'
+          )}
+        </Button>
+      </div>
+    </div>
   )
 }

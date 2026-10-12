@@ -63,7 +63,7 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabaseから最新データを取得
+  // Supabaseから最新データを取得（スロット、アンケートURL、カスタム謝礼などを完全マッピング）
   const fetchExperiments = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -79,37 +79,70 @@ export function Dashboard() {
       if (data && data.length > 0) {
         const mapped: Experiment[] = data.map((item: any) => {
           const isOnline =
+            Boolean(item.survey_url) ||
             item.format?.includes('オンライン') ||
             item.format?.includes('online') ||
             item.location?.includes('オンライン')
 
-          let category: ExperimentCategory = 'Cognitive Psychology'
-          if (item.field?.includes('経済')) category = 'Behavioral Economics'
-          else if (item.field?.includes('VR') || item.field?.includes('視線'))
-            category = 'VR / Eye-Tracking'
-          else if (isOnline) category = 'Online Survey'
+          let category: ExperimentCategory = item.category || 'Cognitive Psychology'
+          if (!item.category) {
+            if (item.field?.includes('経済')) category = 'Behavioral Economics'
+            else if (item.field?.includes('VR') || item.field?.includes('視線'))
+              category = 'VR / Eye-Tracking'
+            else if (isOnline) category = 'Online Survey'
+          }
+
+          // slots が文字列JSONの場合はパース、配列ならそのまま利用
+          let parsedSlots: any[] = []
+          if (Array.isArray(item.slots)) {
+            parsedSlots = item.slots
+          } else if (typeof item.slots === 'string') {
+            try {
+              parsedSlots = JSON.parse(item.slots)
+            } catch (e) {
+              parsedSlots = []
+            }
+          }
+
+          // 謝礼表示テキストの決定
+          const rewardText =
+            item.reward ||
+            (Number(item.reward_amount) > 0
+              ? formatYen(Number(item.reward_amount))
+              : item.reward_type || '謝礼なし')
 
           return {
             id: item.id,
             title: item.title || '無題の実験',
             category: category,
-            department: item.field || '認知心理学専攻',
-            location: item.location || (isOnline ? 'オンライン' : '実験室'),
+            department: item.department || item.field || '認知科学研究室',
+            labName: item.lab_name || item.lab || '青山研究室',
+            professor: item.professor || '指導教員',
+            contact: item.contact || 'contact@keio.jp',
+            location: item.location || (isOnline ? 'オンライン（Webアンケート）' : 'SFC オミクロン館'),
             mode: isOnline ? 'online' : 'in-person',
-            durationMins: parseInt(item.duration) || 45,
-            rewardAmount: Number(item.reward_amount) || 1000,
+            durationMins: Number(item.duration_mins) || parseInt(item.duration) || 30,
+            rewardAmount: Number(item.reward_amount) || 0,
             rewardType: item.reward_type || 'Amazonギフト券',
-            spotsLeft: Number(item.max_participants) || 5,
-            spotsTotal: Number(item.max_participants) || 10,
-            requirements: item.requirements ? [item.requirements] : ['学内生限定'],
+            reward: rewardText,
+            spotsLeft: Number(item.spots_left) || Number(item.max_participants) || (parsedSlots.length > 0 ? parsedSlots.length : 10),
+            spotsTotal: Number(item.spots_total) || Number(item.max_participants) || (parsedSlots.length > 0 ? parsedSlots.length : 10),
+            requirements: Array.isArray(item.requirements)
+              ? item.requirements
+              : item.requirements
+              ? [item.requirements]
+              : ['慶應義塾大学の学生・院生'],
             description: item.description || '',
-            labName: '認知科学研究室',
-            professor: '佐藤 教授',
-            contact: 'lab@labomate.example.ac.jp',
-            ethicsId: 'ETH-2026-001',
-            slots: [],
-          }
+            ethicsId: item.ethics_id || 'ETH-2026-PENDING',
+            // オンライン用URL・照合コード
+            surveyUrl: item.survey_url || undefined,
+            completionCode: item.completion_code || undefined,
+            // 対面スロット一覧
+            slots: parsedSlots,
+          } as any
         })
+
+        // DBの募集を最新優先で表示（ダミーデータ EXPERIMENTS の前に配置）
         setExperiments([...mapped, ...EXPERIMENTS])
       }
     } catch (err) {
