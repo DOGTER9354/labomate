@@ -1,16 +1,20 @@
 'use client'
 
+import { MyBookingsDialog } from '@/components/labomate/my-bookings-dialog'
 import { useLanguage } from '@/lib/language-context'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CalendarCheck,
-  FlaskConical,
   SearchX,
-  Wallet,
   Building2,
   Globe2,
   Coins,
   CheckCircle2,
+  Clock,
+  MapPin,
+  ArrowRight,
+  Gift,
+  Calendar,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +37,16 @@ type StudyModeTab = 'all' | 'in-person' | 'online'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
+interface UserApplicationRecord {
+  id: string
+  experiment_id: string
+  experiment_title: string
+  slot_time: string | null
+  format: string
+  status: string
+  applied_at: string
+}
+
 export function Dashboard() {
   const { t, language } = useLanguage()
   const isJa = language === 'ja'
@@ -43,7 +57,13 @@ export function Dashboard() {
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [myBookingsOpen, setMyBookingsOpen] = useState(false)
+
+  // 予約済みの実験IDとスロット情報のマップ (expId -> slotId)
   const [bookings, setBookings] = useState<Record<string, string>>({})
+  // ユーザーの応募レコード一覧（直近セッション特定用）
+  const [userApplications, setUserApplications] = useState<UserApplicationRecord[]>([])
+
   const [experiments, setExperiments] = useState<Experiment[]>(EXPERIMENTS)
   const [userName, setUserName] = useState('周誠')
 
@@ -63,7 +83,45 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabaseから最新データを取得（スロット、アンケートURL、カスタム謝礼などを完全マッピング）
+  // Supabase からユーザー自身の予約履歴を同期取得
+  const fetchUserBookings = useCallback(async () => {
+    let email = 'student@keio.jp'
+    let name = '周誠'
+    try {
+      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed.email) email = parsed.email
+        if (parsed.name) name = parsed.name
+      }
+    } catch (e) {
+      console.error(e)
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('applications')
+        .select('*')
+        .or(`applicant_email.eq.${email},applicant_name.eq.${name}`)
+        .neq('status', 'キャンセル済み')
+        .order('applied_at', { ascending: false })
+
+      if (!error && data) {
+        setUserApplications(data)
+        const bookingMap: Record<string, string> = {}
+        data.forEach((app) => {
+          if (app.experiment_id) {
+            bookingMap[app.experiment_id] = app.slot_id || 'booked'
+          }
+        })
+        setBookings(bookingMap)
+      }
+    } catch (err) {
+      console.error('Failed to sync user bookings:', err)
+    }
+  }, [])
+
+  // Supabaseから最新データを取得
   const fetchExperiments = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -92,7 +150,6 @@ export function Dashboard() {
             else if (isOnline) category = 'Online Survey'
           }
 
-          // slots が文字列JSONの場合はパース、配列ならそのまま利用
           let parsedSlots: any[] = []
           if (Array.isArray(item.slots)) {
             parsedSlots = item.slots
@@ -104,7 +161,6 @@ export function Dashboard() {
             }
           }
 
-          // 謝礼表示テキストの決定
           const rewardText =
             item.reward ||
             (Number(item.reward_amount) > 0
@@ -134,15 +190,12 @@ export function Dashboard() {
               : ['慶應義塾大学の学生・院生'],
             description: item.description || '',
             ethicsId: item.ethics_id || 'ETH-2026-PENDING',
-            // オンライン用URL・照合コード
             surveyUrl: item.survey_url || undefined,
             completionCode: item.completion_code || undefined,
-            // 対面スロット一覧
             slots: parsedSlots,
           } as any
         })
 
-        // DBの募集を最新優先で表示（ダミーデータ EXPERIMENTS の前に配置）
         setExperiments([...mapped, ...EXPERIMENTS])
       }
     } catch (err) {
@@ -152,7 +205,8 @@ export function Dashboard() {
 
   useEffect(() => {
     fetchExperiments()
-  }, [fetchExperiments])
+    fetchUserBookings()
+  }, [fetchExperiments, fetchUserBookings])
 
   // 対面・オンラインのカウント計算
   const counts = useMemo(() => {
@@ -169,18 +223,13 @@ export function Dashboard() {
     }
   }, [experiments])
 
-  // フィルタリング処理（検索語句・分野タグ・対面/オンライン）
+  // フィルタリング処理
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return experiments.filter((exp) => {
-      // 対面・オンライン切り替え
       if (modeTab === 'in-person' && exp.mode === 'online') return false
       if (modeTab === 'online' && exp.mode !== 'online') return false
-
-      // 分野タグフィルタ
       if (!matchesFilter(exp, filter)) return false
-
-      // 検索バー
       if (!q) return true
       return [
         exp.title,
@@ -196,18 +245,21 @@ export function Dashboard() {
     })
   }, [query, filter, modeTab, experiments])
 
-  const bookedIds = Object.keys(bookings)
-  const pendingRewards = experiments
-    .filter((e) => bookedIds.includes(e.id))
-    .reduce((sum, e) => sum + e.rewardAmount, 0)
   const filterLabel = FILTERS.find((f) => f.id === filter)?.label
 
+  // モーダルを開く処理
   const openExperiment = (exp: Experiment) => {
     setSelected(exp)
     setDialogOpen(true)
   }
 
-  // 実験応募確定処理（Labo Coinの自動加算ロジック）
+  // 直近の予約セッションを特定
+  const nextBooking = userApplications.length > 0 ? userApplications[0] : null
+  const nextExperiment = nextBooking
+    ? experiments.find((e) => e.id === nextBooking.experiment_id)
+    : null
+
+  // 実験応募確定処理
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
 
@@ -215,7 +267,6 @@ export function Dashboard() {
     const isOnline = exp?.mode === 'online'
     const earnedCoins = isOnline ? 20 : 100
 
-    // localStorage の Labo Coin を加算
     try {
       const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
       const current = cached ? JSON.parse(cached) : {}
@@ -228,7 +279,6 @@ export function Dashboard() {
       console.error('Failed to update coins in storage:', e)
     }
 
-    // トースト通知を表示
     const message = isJa
       ? `参加確定！ 報酬に加えて +${earnedCoins} Labo Coin を獲得しました！`
       : `Confirmed! Earned +${earnedCoins} Labo Coins in addition to reward!`
@@ -236,6 +286,8 @@ export function Dashboard() {
     setTimeout(() => {
       setToastMessage(null)
     }, 4000)
+
+    fetchUserBookings()
   }
 
   return (
@@ -249,46 +301,113 @@ export function Dashboard() {
         userName={userName}
       />
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        {/* KPIサマリー */}
-        <section aria-label="Your activity" className="grid grid-cols-3 gap-2 sm:gap-3">
-          {[
-            {
-              icon: FlaskConical,
-              label: t('openExperiments'),
-              value: experiments.length.toString(),
-              tone: 'bg-accent text-accent-foreground',
-            },
-            {
-              icon: CalendarCheck,
-              label: t('upcomingSessions'),
-              value: bookedIds.length.toString(),
-              tone: 'bg-emerald-50 text-emerald-700',
-            },
-            {
-              icon: Wallet,
-              label: t('pendingRewards'),
-              value: formatYen(pendingRewards),
-              tone: 'bg-amber-50 text-amber-700',
-            },
-          ].map(({ icon: Icon, label, value, tone }) => (
-            <div
-              key={label}
-              className="flex flex-col gap-2 rounded-xl border bg-card p-3 sm:flex-row sm:items-center sm:gap-3 sm:p-4"
-            >
-              <span className={`flex size-8 items-center justify-center rounded-lg sm:size-10 ${tone}`}>
-                <Icon className="size-4 sm:size-5" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-[11px] leading-tight text-muted-foreground sm:text-xs">{label}</p>
-                <p className="text-lg font-semibold tracking-tight text-foreground">{value}</p>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+        {/* ========================================================== */}
+        {/* 🌟 最上部：被験者アクティブ・ダッシュボード（直近の参加予定） */}
+        {/* ========================================================== */}
+        {nextBooking ? (
+          <section
+            aria-label="Your Next Session"
+            className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card p-4 sm:p-5 shadow-xs transition-all"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+              <div className="flex items-center gap-2">
+                <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                  <CalendarCheck className="size-4" />
+                </span>
+                <span className="text-xs font-bold text-foreground">
+                  {isJa ? '次の参加予定セッション' : 'Your Next Session'}
+                </span>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 bg-background/80 text-emerald-600 border-emerald-500/30 font-semibold"
+                >
+                  {nextBooking.status}
+                </Badge>
+              </div>
+
+              {/* 全件確認ボタン */}
+              <button
+                type="button"
+                onClick={() => setMyBookingsOpen(true)}
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 self-start sm:self-auto"
+              >
+                <span>{isJa ? `参加予定（全${userApplications.length}件）を確認` : `View all (${userApplications.length})`}</span>
+                <ArrowRight className="size-3.5" />
+              </button>
+            </div>
+
+            <div className="pt-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1.5 min-w-0">
+                <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug truncate">
+                  {nextBooking.experiment_title}
+                </h2>
+
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {nextBooking.slot_time && (
+                    <span className="flex items-center gap-1 text-foreground font-semibold">
+                      <Clock className="size-3.5 text-primary" />
+                      <span>{nextBooking.slot_time}</span>
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1">
+                    <MapPin className="size-3.5" />
+                    <span>{nextExperiment?.location || 'SFC オミクロン館'}</span>
+                  </span>
+                  <span className="flex items-center gap-1 text-foreground/80 font-medium">
+                    <Gift className="size-3.5 text-amber-500" />
+                    <span>謝礼: {(nextExperiment as any)?.reward || (nextExperiment?.rewardAmount ? formatYen(nextExperiment.rewardAmount) : 'Amazonギフト券')}</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* クイックアクション */}
+              <div className="flex items-center gap-2 shrink-0">
+                {nextExperiment && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openExperiment(nextExperiment)}
+                    className="h-8 text-xs font-bold gap-1 bg-background"
+                  >
+                    <span>{isJa ? '詳細・教室を確認' : 'View Details'}</span>
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setMyBookingsOpen(true)}
+                  className="h-8 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                  <span>{isJa ? '変更・キャンセル' : 'Manage'}</span>
+                </Button>
               </div>
             </div>
-          ))}
-        </section>
+          </section>
+        ) : (
+          /* 予約が0件のときのスマート案内バー */
+          <div className="rounded-xl border border-dashed bg-card/60 p-3 sm:p-4 flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <Calendar className="size-4" />
+              </span>
+              <div>
+                <p className="font-semibold text-foreground">
+                  {isJa ? '現在、確定した実験予定はありません' : 'No upcoming lab sessions'}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {isJa ? '空きコマの時間に合う実験に応募してみましょう！' : 'Find and join studies fitting your free periods!'}
+                </p>
+              </div>
+            </div>
+            <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">
+              参加で +100 LC
+            </Badge>
+          </div>
+        )}
 
-        {/* 2大カテゴリ切り替えタブ（対面実験 vs オンライン回答） */}
-        <div className="mt-8 rounded-2xl border bg-card/60 p-2 shadow-sm backdrop-blur">
+        {/* 2大カテゴリ切り替えタブ（学内対面 vs オンライン回答） */}
+        <div className="rounded-2xl border bg-card/60 p-2 shadow-sm backdrop-blur">
           <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
             <button
               type="button"
@@ -377,15 +496,15 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* リストタイトル */}
-        <div className="mt-8 flex flex-wrap items-end justify-between gap-2">
+        {/* リストヘッダー */}
+        <div className="flex flex-wrap items-end justify-between gap-2 pt-2">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-balance text-foreground sm:text-2xl">
               {modeTab === 'in-person'
                 ? isJa ? '学内対面実験一覧' : 'In-Person Lab Studies'
                 : modeTab === 'online'
                 ? isJa ? 'オンライン回答・調査一覧' : 'Online Surveys & Studies'
-                : t('sectionTitle')}
+                : isJa ? '現在募集中の実験・調査' : 'Active Studies'}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               {visible.length} {t('studiesCount')}
@@ -397,7 +516,7 @@ export function Dashboard() {
 
         {/* 実験カードグリッド */}
         {visible.length > 0 ? (
-          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {visible.map((exp) => (
               <ExperimentCard
                 key={exp.id}
@@ -408,7 +527,7 @@ export function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="mt-5 flex flex-col items-center rounded-xl border border-dashed bg-card px-6 py-16 text-center">
+          <div className="flex flex-col items-center rounded-xl border border-dashed bg-card px-6 py-16 text-center">
             <SearchX className="size-8 text-muted-foreground" aria-hidden="true" />
             <p className="mt-3 font-medium text-foreground">{t('noResultsTitle')}</p>
             <p className="mt-1 text-sm text-muted-foreground">{t('noResultsSubtitle')}</p>
@@ -442,6 +561,16 @@ export function Dashboard() {
         onOpenChange={setCreateDialogOpen}
         onSuccess={() => {
           fetchExperiments()
+        }}
+      />
+
+      {/* 参加予定・予約一覧モーダル */}
+      <MyBookingsDialog
+        open={myBookingsOpen}
+        onOpenChange={setMyBookingsOpen}
+        onBookingCanceled={() => {
+          fetchExperiments()
+          fetchUserBookings()
         }}
       />
 
