@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { Search, Compass, Coins, User } from 'lucide-react'
+import { Search, Compass, Coins, User, Sun, Moon, Laptop, Check } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
+import { useTheme, type ThemeMode } from '@/lib/theme-context'
 import type { FilterId } from '@/lib/experiments'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
@@ -27,8 +28,11 @@ export function TopNav({
 }: TopNavProps) {
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
+  const { theme, setTheme, resolvedTheme } = useTheme()
 
   const [laboCoins, setLaboCoins] = useState<number>(350)
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     try {
@@ -43,6 +47,22 @@ export function TopNav({
       console.error(e)
     }
   }, [])
+
+  // メニュー外クリックで閉じる
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setThemeMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selectTheme = (mode: ThemeMode) => {
+    setTheme(mode)
+    setThemeMenuOpen(false)
+  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/80 bg-background/85 backdrop-blur-md">
@@ -86,8 +106,73 @@ export function TopNav({
           </div>
         )}
 
-        {/* 右側：言語切替、コイン、プロフィールアイコン */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* 右側：テーマ切替、言語切替、コイン、プロフィールアイコン */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* テーマ切替ポップアップ */}
+          <div className="relative" ref={menuRef}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setThemeMenuOpen(!themeMenuOpen)}
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+              title={isJa ? '外観テーマの切替' : 'Change theme'}
+            >
+              {theme === 'system' ? (
+                <Laptop className="size-4" />
+              ) : resolvedTheme === 'dark' ? (
+                <Moon className="size-4" />
+              ) : (
+                <Sun className="size-4" />
+              )}
+            </Button>
+
+            {themeMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border bg-card p-1 shadow-lg text-xs z-50 space-y-0.5 animate-in fade-in-0 zoom-in-95">
+                <button
+                  type="button"
+                  onClick={() => selectTheme('system')}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+                    theme === 'system' ? 'bg-primary/10 text-primary font-bold' : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Laptop className="size-3.5" />
+                    <span>{isJa ? '自動（端末連動）' : 'System'}</span>
+                  </span>
+                  {theme === 'system' && <Check className="size-3" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => selectTheme('light')}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+                    theme === 'light' ? 'bg-primary/10 text-primary font-bold' : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Sun className="size-3.5" />
+                    <span>{isJa ? 'ライト' : 'Light'}</span>
+                  </span>
+                  {theme === 'light' && <Check className="size-3" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => selectTheme('dark')}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+                    theme === 'dark' ? 'bg-primary/10 text-primary font-bold' : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Moon className="size-3.5" />
+                    <span>{isJa ? 'ダーク' : 'Dark'}</span>
+                  </span>
+                  {theme === 'dark' && <Check className="size-3" />}
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* 言語切替 */}
           <Button
             variant="ghost"

@@ -17,18 +17,19 @@ import {
   Mail,
   Moon,
   Sun,
+  Laptop,
   Globe,
   LogOut,
   Sparkles,
   Ticket,
   Rocket,
   Flame,
-  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useLanguage } from '@/lib/language-context'
+import { useTheme } from '@/lib/theme-context'
 import { supabase } from '@/lib/supabase'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
@@ -58,10 +59,10 @@ interface ApplicationRecord {
 export default function ProfilePage() {
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
+  const { theme, setTheme } = useTheme()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('basic')
   const [isEditing, setIsEditing] = useState(false)
-  const [isDarkMode, setIsDarkMode] = useState(true)
 
   // プロフィール情報
   const [profile, setProfile] = useState<ProfileData>({
@@ -148,17 +149,6 @@ export default function ProfilePage() {
   const handleCancelEdit = () => {
     setFormData(profile)
     setIsEditing(false)
-  }
-
-  // ダークモードトグル（クラス切替連動）
-  const toggleDarkMode = () => {
-    const next = !isDarkMode
-    setIsDarkMode(next)
-    if (next) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
   }
 
   return (
@@ -301,12 +291,9 @@ export default function ProfilePage() {
           </button>
         </div>
 
-        {/* ======================================================== */}
         {/* タブ 1: 基本情報 & 慶應認証 */}
-        {/* ======================================================== */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
-            {/* 認証バッジブロック */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -336,7 +323,6 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* 基本属性フォーム */}
             <div className="rounded-2xl border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
@@ -417,9 +403,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* ======================================================== */}
         {/* タブ 2: 実験履歴 */}
-        {/* ======================================================== */}
         {activeTab === 'history' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -475,12 +459,9 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* ======================================================== */}
         {/* タブ 3: 財布 & コイン */}
-        {/* ======================================================== */}
         {activeTab === 'wallet' && (
           <div className="space-y-6">
-            {/* Labo Coin 残高 */}
             <div className="rounded-2xl border bg-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground font-medium">保有コイン残高</span>
@@ -501,7 +482,6 @@ export default function ProfilePage() {
               </Button>
             </div>
 
-            {/* 保持しているアイテム */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
                 <Sparkles className="size-4 text-primary" />
@@ -536,7 +516,6 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* 受け取った謝礼・学内クーポン */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
                 <Ticket className="size-4 text-emerald-500" />
@@ -553,15 +532,13 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* ======================================================== */}
         {/* タブ 4: 設定 (Settings) */}
-        {/* ======================================================== */}
         {activeTab === 'settings' && (
           <div className="rounded-2xl border bg-card p-5 space-y-5">
             <h3 className="text-sm font-bold text-foreground border-b pb-3">アカウント & アプリ設定</h3>
 
             <div className="space-y-4 text-xs">
-              {/* メールアドレス変更 */}
+              {/* 1. メールアドレス変更 */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -575,7 +552,7 @@ export default function ProfilePage() {
                 </Button>
               </div>
 
-              {/* パスワード変更 */}
+              {/* 2. パスワード変更 */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -589,7 +566,7 @@ export default function ProfilePage() {
                 </Button>
               </div>
 
-              {/* 言語設定 */}
+              {/* 3. 表示言語 */}
               <div className="flex items-center justify-between pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -618,29 +595,53 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* ダークモード切替 */}
-              <div className="flex items-center justify-between pb-3 border-b">
+              {/* 4. 外観テーマ（表示言語の下） */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
-                    {isDarkMode ? <Moon className="size-3.5 text-muted-foreground" /> : <Sun className="size-3.5 text-muted-foreground" />}
-                    <span>外観テーマ (Dark / Light)</span>
+                    <Laptop className="size-3.5 text-muted-foreground" />
+                    <span>外観テーマ (Appearance)</span>
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    現在: {isDarkMode ? 'ダークモード' : 'ライトモード'}
+                    {theme === 'system'
+                      ? isJa ? '自動（端末の明暗設定に合わせる）' : 'System default'
+                      : theme === 'dark'
+                      ? isJa ? 'ダークモード' : 'Dark theme'
+                      : isJa ? 'ライトモード' : 'Light theme'}
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={toggleDarkMode}
-                  className="h-8 text-xs font-semibold gap-1.5"
-                >
-                  {isDarkMode ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-                  <span>{isDarkMode ? 'ライトに切替' : 'ダークに切替'}</span>
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant={theme === 'system' ? 'default' : 'outline'}
+                    onClick={() => setTheme('system')}
+                    className="h-7 px-2.5 text-xs font-semibold"
+                  >
+                    <Laptop className="size-3 mr-1" />
+                    <span>{isJa ? '自動' : 'Auto'}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={theme === 'light' ? 'default' : 'outline'}
+                    onClick={() => setTheme('light')}
+                    className="h-7 px-2.5 text-xs font-semibold"
+                  >
+                    <Sun className="size-3 mr-1" />
+                    <span>{isJa ? 'ライト' : 'Light'}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={theme === 'dark' ? 'default' : 'outline'}
+                    onClick={() => setTheme('dark')}
+                    className="h-7 px-2.5 text-xs font-semibold"
+                  >
+                    <Moon className="size-3 mr-1" />
+                    <span>{isJa ? 'ダーク' : 'Dark'}</span>
+                  </Button>
+                </div>
               </div>
 
-              {/* ログアウト / リセット */}
+              {/* 5. ログアウト / リセット */}
               <div className="flex items-center justify-between pt-1">
                 <div className="space-y-0.5">
                   <p className="font-bold text-destructive flex items-center gap-1.5">

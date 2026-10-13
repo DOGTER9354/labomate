@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Gift,
   Calendar,
+  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -58,6 +59,9 @@ export function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [myBookingsOpen, setMyBookingsOpen] = useState(false)
+
+  // 🔃 リロード処理中ステート
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // 予約済みの実験IDとスロット情報のマップ (expId -> slotId)
   const [bookings, setBookings] = useState<Record<string, string>>({})
@@ -207,6 +211,18 @@ export function Dashboard() {
     fetchExperiments()
     fetchUserBookings()
   }, [fetchExperiments, fetchUserBookings])
+
+  // 🔃 リロードボタンの押下ハンドラ
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      await Promise.all([fetchExperiments(), fetchUserBookings()])
+    } catch (e) {
+      console.error('Refresh error:', e)
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500)
+    }
+  }
 
   // 対面・オンラインのカウント計算
   const counts = useMemo(() => {
@@ -496,8 +512,8 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* リストヘッダー */}
-        <div className="flex flex-wrap items-end justify-between gap-2 pt-2">
+        {/* リストヘッダー & 🔃 リロードボタン */}
+        <div className="flex items-center justify-between gap-2 pt-2">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-balance text-foreground sm:text-2xl">
               {modeTab === 'in-person'
@@ -512,6 +528,23 @@ export function Dashboard() {
               {query.trim() && ` · matching "${query.trim()}"`}
             </p>
           </div>
+
+          {/* 🔃 リロードボタン */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="h-8 px-2.5 text-xs font-semibold gap-1.5 hover:bg-muted shrink-0"
+            title={isJa ? '最新情報に更新' : 'Refresh'}
+          >
+            <RefreshCw
+              className={`size-3.5 text-muted-foreground ${
+                isRefreshing ? 'animate-spin text-primary' : ''
+              }`}
+            />
+            <span className="hidden sm:inline">{isJa ? '更新' : 'Refresh'}</span>
+          </Button>
         </div>
 
         {/* 実験カードグリッド */}

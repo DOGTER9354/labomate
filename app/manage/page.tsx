@@ -5,23 +5,21 @@ import Link from 'next/link'
 import {
   Plus,
   Users,
-  Calendar,
   Building2,
   Globe2,
   ArrowRight,
-  Sparkles,
   ClipboardList,
   Loader2,
-  Clock,
   ArrowLeft,
-  Coins,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
 import { supabase } from '@/lib/supabase'
 import { CreateExperimentDialog } from '@/components/labomate/create-experiment-dialog'
-import { EXPERIMENTS, type Experiment } from '@/lib/experiments'
+import { EXPERIMENTS } from '@/lib/experiments'
 
 export default function ManagePage() {
   const { language } = useLanguage()
@@ -30,6 +28,11 @@ export default function ManagePage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [myExperiments, setMyExperiments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+
+  // 削除確認ダイアログ用ステート
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deletingTitle, setDeletingTitle] = useState<string>('')
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // 募集実験一覧を取得（Supabase + サンプルデータ）
   const fetchExperiments = useCallback(async () => {
@@ -43,7 +46,7 @@ export default function ManagePage() {
       if (!error && data && data.length > 0) {
         setMyExperiments(data)
       } else {
-        // フォールバック（初期表示サンプル）
+        // 初期サンプル
         setMyExperiments(EXPERIMENTS.slice(0, 3))
       }
     } catch (e) {
@@ -57,6 +60,32 @@ export default function ManagePage() {
   useEffect(() => {
     fetchExperiments()
   }, [fetchExperiments])
+
+  // 削除・取り下げ実行処理
+  const handleConfirmDelete = async () => {
+    if (!deletingId) return
+    setIsDeleting(true)
+
+    try {
+      // 1. Supabase から削除を試行
+      const { error } = await supabase
+        .from('experiments')
+        .delete()
+        .eq('id', deletingId)
+
+      if (error) {
+        console.warn('Supabase delete error (fallback to local filter):', error)
+      }
+
+      // 2. ローカルステートからも即座に除外
+      setMyExperiments((prev) => prev.filter((exp) => exp.id !== deletingId))
+      setDeletingId(null)
+    } catch (err) {
+      console.error('Delete experiment error:', err)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   return (
     <div className="min-h-dvh bg-background text-foreground pb-24">
@@ -96,8 +125,8 @@ export default function ManagePage() {
             </div>
             <p className="text-xs text-muted-foreground">
               {isJa
-                ? 'あなたが企画した実験の募集状況確認、被験者名簿の確認、新規募集がここで行えます。'
-                : 'Manage your active studies, inspect applicants, and launch new recruitment.'}
+                ? 'あなたが企画した実験の募集状況確認、被験者名簿の確認、新規募集や取り下げがここで行えます。'
+                : 'Manage active studies, view applicants, and launch or withdraw recruitments.'}
             </p>
           </div>
 
@@ -129,12 +158,12 @@ export default function ManagePage() {
           ) : myExperiments.length === 0 ? (
             <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-2">
               <p className="text-xs font-bold text-foreground">
-                {isJa ? 'まだ募集している実験がありません' : 'No active recruitments yet'}
+                {isJa ? '現在募集中の実験はありません' : 'No active recruitments'}
               </p>
               <p className="text-[11px] text-muted-foreground">
                 {isJa
                   ? '右上のボタンから最初の被験者募集を公開してみましょう！'
-                  : 'Click the button above to publish your first study!'}
+                  : 'Click the button above to publish your study!'}
               </p>
               <Button
                 size="sm"
@@ -188,7 +217,22 @@ export default function ManagePage() {
                     </div>
                   </div>
 
+                  {/* アクション群 */}
                   <div className="flex items-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0">
+                    {/* 削除・取り下げボタン */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setDeletingId(exp.id)
+                        setDeletingTitle(exp.title)
+                      }}
+                      className="h-8 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      title={isJa ? '募集を取り下げる' : 'Cancel Study'}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+
                     <Button
                       size="sm"
                       variant="outline"
@@ -197,11 +241,12 @@ export default function ManagePage() {
                     >
                       <span>{isJa ? '編集' : 'Edit'}</span>
                     </Button>
+
                     <Button
                       size="sm"
                       className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground"
                     >
-                      <span>{isJa ? '応募者名簿・枠確認' : 'Manage Applicants'}</span>
+                      <span>{isJa ? '名簿・枠確認' : 'Manage'}</span>
                       <ArrowRight className="size-3" />
                     </Button>
                   </div>
@@ -211,6 +256,52 @@ export default function ManagePage() {
           )}
         </section>
       </main>
+
+      {/* 募集削除・取り下げ確認モーダル */}
+      {deletingId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-2xl border bg-card p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-destructive">
+              <div className="p-2 rounded-xl bg-destructive/10">
+                <AlertTriangle className="size-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-foreground">
+                  {isJa ? '実験募集を取り下げますか？' : 'Cancel Experiment?'}
+                </h3>
+                <p className="text-[11px] text-muted-foreground">この操作は取り消せません</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              「<strong className="text-foreground">{deletingTitle}</strong>」の募集を終了・削除します。
+              一覧から非表示になり、被験者からの新規応募を受け付けなくなります。
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDeletingId(null)}
+                disabled={isDeleting}
+                className="h-8 text-xs font-medium"
+              >
+                {isJa ? '戻る' : 'Cancel'}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="h-8 text-xs font-bold gap-1"
+              >
+                {isDeleting && <Loader2 className="size-3 animate-spin" />}
+                <span>{isJa ? '取り下げる' : 'Delete'}</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 新規募集作成モーダル */}
       <CreateExperimentDialog
