@@ -56,6 +56,8 @@ interface ProfileData {
   dominantHand: string
   vision: string
   laboCoins: number
+  itemPinCount: number
+  itemBadgeCount: number
 }
 
 interface ApplicationRecord {
@@ -88,6 +90,8 @@ export default function ProfilePage() {
     dominantHand: '右利き',
     vision: '裸眼',
     laboCoins: 0,
+    itemPinCount: 0,
+    itemBadgeCount: 0,
   })
 
   // 編集用一時フォーム状態
@@ -100,44 +104,77 @@ export default function ProfilePage() {
   // 保存メッセージ
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
-  // Supabase Auth のログインユーザー情報およびローカルストレージを同期
+  // Supabase Auth および user_profiles テーブルと同期
   useEffect(() => {
-    if (user) {
-      let baseProfile: ProfileData = {
-        name: user.user_metadata?.full_name || '学生ユーザー',
-        email: user.email || '',
-        faculty: user.user_metadata?.faculty || '未設定',
-        grade: '学部生',
-        dominantHand: '右利き',
-        vision: '裸眼',
-        laboCoins: 350,
-      }
-
-      try {
-        const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-        if (cached) {
-          baseProfile = { ...baseProfile, ...JSON.parse(cached) }
+    const loadProfile = async () => {
+      if (user) {
+        let baseProfile: ProfileData = {
+          name: user.user_metadata?.full_name || '学生ユーザー',
+          email: user.email || '',
+          faculty: user.user_metadata?.faculty || '未設定',
+          grade: '学部生',
+          dominantHand: '右利き',
+          vision: '裸眼',
+          laboCoins: 350,
+          itemPinCount: 0,
+          itemBadgeCount: 0,
         }
-      } catch (e) {
-        console.error(e)
-      }
 
-      setProfile(baseProfile)
-      setFormData(baseProfile)
-    } else {
-      // 未ログイン時の表示
-      const guestProfile: ProfileData = {
-        name: 'ゲストユーザー',
-        email: 'ログインしていません',
-        faculty: '未登録',
-        grade: '未設定',
-        dominantHand: '未設定',
-        vision: '未設定',
-        laboCoins: 0,
+        // 1. Supabase の user_profiles からコインとアイテム数を取得
+        try {
+          const { data, error } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single()
+
+          if (!error && data) {
+            if (data.full_name) baseProfile.name = data.full_name
+            if (data.faculty) baseProfile.faculty = data.faculty
+            if (typeof data.labo_coins === 'number') baseProfile.laboCoins = data.labo_coins
+            if (typeof data.item_pin_count === 'number') baseProfile.itemPinCount = data.item_pin_count
+            if (typeof data.item_badge_count === 'number') baseProfile.itemBadgeCount = data.item_badge_count
+          }
+        } catch (dbErr) {
+          console.error('Failed to load user_profiles from DB:', dbErr)
+        }
+
+        // 2. ローカルキャッシュの属性情報（利き手、視力等）を合成
+        try {
+          const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
+          if (cached) {
+            const parsed = JSON.parse(cached)
+            baseProfile = {
+              ...baseProfile,
+              dominantHand: parsed.dominantHand || baseProfile.dominantHand,
+              vision: parsed.vision || baseProfile.vision,
+              grade: parsed.grade || baseProfile.grade,
+            }
+          }
+        } catch (e) {
+          console.error(e)
+        }
+
+        setProfile(baseProfile)
+        setFormData(baseProfile)
+      } else {
+        const guestProfile: ProfileData = {
+          name: 'ゲストユーザー',
+          email: 'ログインしていません',
+          faculty: '未登録',
+          grade: '未設定',
+          dominantHand: '未設定',
+          vision: '未設定',
+          laboCoins: 0,
+          itemPinCount: 0,
+          itemBadgeCount: 0,
+        }
+        setProfile(guestProfile)
+        setFormData(guestProfile)
       }
-      setProfile(guestProfile)
-      setFormData(guestProfile)
     }
+
+    loadProfile()
   }, [user])
 
   // 履歴取得（ログイン時のみ実行）
@@ -194,6 +231,16 @@ export default function ProfilePage() {
         PROFILE_STORAGE_KEY,
         JSON.stringify({ ...current, ...formData })
       )
+
+      // Supabase の user_profiles も更新
+      await supabase
+        .from('user_profiles')
+        .update({
+          full_name: formData.name,
+          faculty: formData.faculty,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
 
       await supabase.auth.updateUser({
         data: {
@@ -418,7 +465,6 @@ export default function ProfilePage() {
         {/* タブ 1: 基本情報 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
-            {/* 大学認証ステータス */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -470,7 +516,6 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* 基本属性情報 */}
             <div className="rounded-2xl border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
@@ -634,7 +679,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* タブ 3: 財布 & コイン */}
+        {/* タブ 3: 財布 & アイテム（DB連動） */}
         {activeTab === 'wallet' && (
           <div className="space-y-6">
             <div className="rounded-2xl border bg-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -676,6 +721,7 @@ export default function ProfilePage() {
               </div>
             )}
 
+            {/* 保持しているアイテム（DBの所持数と連動） */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
                 <Sparkles className="size-4 text-primary" />
@@ -692,7 +738,9 @@ export default function ProfilePage() {
                       <p className="text-[10px] text-muted-foreground">募集中の実験を先頭固定</p>
                     </div>
                   </div>
-                  <span className="font-bold text-foreground">0 個</span>
+                  <span className="font-bold text-foreground">
+                    {user ? `${profile.itemPinCount} 個` : '0 個'}
+                  </span>
                 </div>
 
                 <div className="p-3 rounded-xl border bg-muted/20 flex items-center justify-between">
@@ -705,7 +753,9 @@ export default function ProfilePage() {
                       <p className="text-[10px] text-muted-foreground">スロット枠を強調表示</p>
                     </div>
                   </div>
-                  <span className="font-bold text-foreground">0 個</span>
+                  <span className="font-bold text-foreground">
+                    {user ? `${profile.itemBadgeCount} 個` : '0 個'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -732,7 +782,6 @@ export default function ProfilePage() {
             <h3 className="text-sm font-bold text-foreground border-b pb-3">アカウント & アプリ設定</h3>
 
             <div className="space-y-4 text-xs">
-              {/* 1. メールアドレス確認 */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -757,7 +806,6 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* 2. パスワード変更 */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -782,7 +830,6 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* 3. 表示言語（未ログインでも自由に変更可能） */}
               <div className="flex items-center justify-between pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -811,7 +858,6 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* 4. 外観テーマ（未ログインでも自由に変更可能） */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -857,7 +903,6 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* 5. ログアウト（ログイン時のみ表示） */}
               {user && (
                 <div className="flex items-center justify-between pt-1">
                   <div className="space-y-0.5">
@@ -883,10 +928,9 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* タブ 5: サポート & ガイド（誰でも完全閲覧可能） */}
+        {/* タブ 5: サポート & ガイド */}
         {activeTab === 'support' && (
           <div className="space-y-6">
-            {/* 1. マニュアル・ガイド */}
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <BookOpen className="size-4 text-primary" />
@@ -918,7 +962,6 @@ export default function ProfilePage() {
               </div>
             </section>
 
-            {/* 2. 公式SNS */}
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <Share2 className="size-4 text-primary" />
@@ -928,7 +971,6 @@ export default function ProfilePage() {
               </div>
 
               <div className="rounded-2xl border bg-card divide-y text-xs">
-                {/* 公式X */}
                 <a
                   href="https://x.com/Labomate1005"
                   target="_blank"
@@ -952,7 +994,6 @@ export default function ProfilePage() {
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </a>
 
-                {/* 公式Instagram */}
                 <a
                   href="https://instagram.com/labomate1005?obrf=MXNneWc1cXNsazRl"
                   target="_blank"
@@ -978,7 +1019,6 @@ export default function ProfilePage() {
               </div>
             </section>
 
-            {/* 3. お問い合わせ窓口 */}
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <Mail className="size-4 text-primary" />
@@ -1027,7 +1067,6 @@ export default function ProfilePage() {
               </div>
             </section>
 
-            {/* 4. 運営組織・基本情報 */}
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <Building className="size-4 text-primary" />

@@ -108,23 +108,22 @@ export default function LoginPage() {
 
   // Google ログイン
   const handleGoogleSignIn = async () => {
-    setMessage(null)
-    setGoogleLoading(true)
     try {
+      setLoading(true)
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          // 直接トップページへリダイレクト
+          redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/` : undefined,
         },
       })
       if (error) throw error
     } catch (err: any) {
-      console.error(err)
       setMessage({
         type: 'error',
-        text: err.message || (isJa ? 'Googleログインに失敗しました。' : 'Google sign-in failed.'),
+        text: err.message || (isJa ? 'Google ログインに失敗しました' : 'Failed to sign in with Google'),
       })
-      setGoogleLoading(false)
+      setLoading(false)
     }
   }
 

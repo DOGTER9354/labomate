@@ -10,8 +10,7 @@ import { useLanguage } from '@/lib/language-context'
 import { useTheme, type ThemeMode } from '@/lib/theme-context'
 import type { FilterId } from '@/lib/experiments'
 import { useAuth } from '@/lib/auth-context'
-
-const PROFILE_STORAGE_KEY = 'labomate_user_profile'
+import { supabase } from '@/lib/supabase'
 
 interface TopNavProps {
   query?: string
@@ -25,30 +24,44 @@ interface TopNavProps {
 export function TopNav({
   query = '',
   onQueryChange,
-  userName = '周誠',
 }: TopNavProps) {
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user } = useAuth()
 
-  const [laboCoins, setLaboCoins] = useState<number>(350)
+  const [laboCoins, setLaboCoins] = useState<number>(0)
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  // Supabase DB からコイン残高を取得
   useEffect(() => {
-    try {
-      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (typeof parsed.laboCoins === 'number') {
-          setLaboCoins(parsed.laboCoins)
-        }
-      }
-    } catch (e) {
-      console.error(e)
+    if (!user) {
+      setLaboCoins(0)
+      return
     }
-  }, [])
+
+    const fetchCoins = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('labo_coins')
+          .eq('id', user.id)
+          .single()
+
+        if (!error && data && typeof data.labo_coins === 'number') {
+          setLaboCoins(data.labo_coins)
+        } else {
+          // フォールバック
+          setLaboCoins(350)
+        }
+      } catch (e) {
+        console.error(e)
+      }
+    }
+
+    fetchCoins()
+  }, [user])
 
   // メニュー外クリックで閉じる
   useEffect(() => {
