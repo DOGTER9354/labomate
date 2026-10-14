@@ -34,6 +34,7 @@ import {
   User,
   LogIn,
   AlertCircle,
+  Unlink,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -43,6 +44,8 @@ import { useTheme } from '@/lib/theme-context'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
+import { KeioGuardDialog } from '@/components/labomate/keio-guard-dialog'
+import { verifyAcademicEmail } from '@/lib/academic-auth'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
@@ -80,6 +83,13 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('basic')
   const [isEditing, setIsEditing] = useState(false)
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
+  const [keioDialogOpen, setKeioDialogOpen] = useState(false)
+
+  // 大学認証ステータス
+  const [isAcademicVerified, setIsAcademicVerified] = useState(false)
+  const [academicEmail, setAcademicEmail] = useState<string | null>(null)
+  const [institutionName, setInstitutionName] = useState<string>('未認証')
+  const [isUnlinking, setIsUnlinking] = useState(false)
 
   // プロフィール情報（ゲスト用デフォルト）
   const [profile, setProfile] = useState<ProfileData>({
@@ -104,6 +114,50 @@ export default function ProfilePage() {
   // 保存メッセージ
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
+  // 🎓 慶應義塾大学 SSO 認証から戻ってきた時の検知＆DB更新処理
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+
+    if (params.get('verify_keio') === 'true' && user) {
+      const email = user.email || ''
+      const emailCheck = verifyAcademicEmail(email)
+
+      if (emailCheck.isKeio || email.endsWith('@keio.jp') || email.endsWith('.keio.jp')) {
+        supabase
+          .from('user_profiles')
+          .update({
+            is_academic_verified: true,
+            academic_email: email,
+            academic_institution: '慶應義塾大学',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id)
+          .then(({ error }) => {
+            if (!error) {
+              setIsAcademicVerified(true)
+              setAcademicEmail(email)
+              setInstitutionName('慶應義塾大学')
+              setSavedNotice(
+                isJa
+                  ? '慶應義塾大学の公式所属認証が完了しました！認証バッジが付与されました。'
+                  : 'Keio University verification completed!'
+              )
+              setTimeout(() => setSavedNotice(null), 4000)
+            }
+            window.history.replaceState({}, '', '/profile')
+          })
+      } else {
+        alert(
+          isJa
+            ? '認証されたアカウントが慶應義塾（@keio.jp）ではありませんでした。@keio.jp のアカウントでお試しください。'
+            : 'The verified account is not a @keio.jp account.'
+        )
+        window.history.replaceState({}, '', '/profile')
+      }
+    }
+  }, [user, isJa])
+
   // Supabase Auth および user_profiles テーブルと同期
   useEffect(() => {
     const loadProfile = async () => {
@@ -120,7 +174,8 @@ export default function ProfilePage() {
           itemBadgeCount: 0,
         }
 
-        // 1. Supabase の user_profiles からコインとアイテム数を取得
+        const emailCheck = verifyAcademicEmail(user.email)
+
         try {
           const { data, error } = await supabase
             .from('user_profiles')
@@ -134,12 +189,26 @@ export default function ProfilePage() {
             if (typeof data.labo_coins === 'number') baseProfile.laboCoins = data.labo_coins
             if (typeof data.item_pin_count === 'number') baseProfile.itemPinCount = data.item_pin_count
             if (typeof data.item_badge_count === 'number') baseProfile.itemBadgeCount = data.item_badge_count
+
+            // DB上の明示的なフラグ設定を優先
+            const verified = data.is_academic_verified !== null && data.is_academic_verified !== undefined
+              ? data.is_academic_verified
+              : emailCheck.isVerified
+
+            setIsAcademicVerified(verified)
+            setAcademicEmail(data.academic_email || (verified ? user.email || null : null))
+            setInstitutionName(data.academic_institution || (verified ? emailCheck.institutionName : '未認証'))
+          } else {
+            setIsAcademicVerified(emailCheck.isVerified)
+            setAcademicEmail(emailCheck.isVerified ? user.email || null : null)
+            setInstitutionName(emailCheck.institutionName)
           }
         } catch (dbErr) {
           console.error('Failed to load user_profiles from DB:', dbErr)
+          setIsAcademicVerified(emailCheck.isVerified)
+          setInstitutionName(emailCheck.institutionName)
         }
 
-        // 2. ローカルキャッシュの属性情報（利き手、視力等）を合成
         try {
           const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
           if (cached) {
@@ -171,6 +240,9 @@ export default function ProfilePage() {
         }
         setProfile(guestProfile)
         setFormData(guestProfile)
+        setIsAcademicVerified(false)
+        setAcademicEmail(null)
+        setInstitutionName('未認証')
       }
     }
 
@@ -232,7 +304,6 @@ export default function ProfilePage() {
         JSON.stringify({ ...current, ...formData })
       )
 
-      // Supabase の user_profiles も更新
       await supabase
         .from('user_profiles')
         .update({
@@ -259,6 +330,52 @@ export default function ProfilePage() {
   const handleCancelEdit = () => {
     setFormData(profile)
     setIsEditing(false)
+  }
+
+  // 大学認証成功時のコールバック
+  const handleVerifiedSuccess = (verifiedEmail: string, instName: string) => {
+    setIsAcademicVerified(true)
+    setAcademicEmail(verifiedEmail)
+    setInstitutionName(instName)
+    setSavedNotice(isJa ? `${instName} の所属認証が完了しました！` : 'Academic verification completed!')
+    setTimeout(() => setSavedNotice(null), 3500)
+  }
+
+  // 🔓 大学認証の解除処理
+  const handleUnlinkAcademic = async () => {
+    if (!user) return
+    const confirmed = window.confirm(
+      isJa
+        ? '大学所属の認証を解除しますか？\n解除すると学内限定の実験や調査への参加ができなくなります。'
+        : 'Are you sure you want to remove academic verification?'
+    )
+    if (!confirmed) return
+
+    setIsUnlinking(true)
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({
+          is_academic_verified: false,
+          academic_email: null,
+          academic_institution: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+
+      if (error) throw error
+
+      setIsAcademicVerified(false)
+      setAcademicEmail(null)
+      setInstitutionName('未認証')
+      setSavedNotice(isJa ? '大学認証を解除しました。' : 'Academic verification removed.')
+      setTimeout(() => setSavedNotice(null), 3500)
+    } catch (err: any) {
+      console.error('Failed to unlink:', err)
+      alert(err.message || '解除に失敗しました。')
+    } finally {
+      setIsUnlinking(false)
+    }
   }
 
   // ログアウト処理
@@ -323,10 +440,17 @@ export default function ProfilePage() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold text-foreground">{profile.name}</h1>
                 {user ? (
-                  <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5">
-                    <ShieldCheck className="size-3.5" />
-                    <span>大学所属 認証済み</span>
-                  </Badge>
+                  isAcademicVerified ? (
+                    <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5">
+                      <ShieldCheck className="size-3.5" />
+                      <span>{institutionName} 認証済み</span>
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px] flex items-center gap-1">
+                      <AlertCircle className="size-3" />
+                      <span>一般アカウント（大学未認証）</span>
+                    </Badge>
+                  )
                 ) : (
                   <Badge variant="outline" className="text-[10px] text-muted-foreground">
                     未ログイン
@@ -465,15 +589,22 @@ export default function ProfilePage() {
         {/* タブ 1: 基本情報 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
+            {/* 大学認証ステータス */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                    <span>大学ドメイン認証 (@ac.jp / @keio.jp 等)</span>
+                    <span>大学ドメイン認証 (@keio.jp / @ac.jp 等)</span>
                     {user ? (
-                      <Badge className="bg-emerald-500/15 text-emerald-500 border-none text-[10px]">
-                        認証完了
-                      </Badge>
+                      isAcademicVerified ? (
+                        <Badge className="bg-emerald-500/15 text-emerald-500 border-none text-[10px]">
+                          認証完了
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-amber-500 border-amber-500/40 text-[10px]">
+                          未認証
+                        </Badge>
+                      )
                     ) : (
                       <Badge variant="secondary" className="text-[10px]">
                         未ログイン
@@ -487,18 +618,62 @@ export default function ProfilePage() {
               </div>
 
               {user ? (
-                <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <CheckCircle2 className="size-4 text-emerald-500" />
-                    <div>
-                      <p className="text-xs font-bold text-foreground">学生・研究機関 認証済み</p>
-                      <p className="text-[11px] text-muted-foreground font-mono">{profile.email}</p>
+                isAcademicVerified ? (
+                  <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-foreground">{institutionName} 認証済み</p>
+                          <Badge variant="outline" className="text-[9px] text-emerald-500 border-emerald-500/40">
+                            有効
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground font-mono">
+                          認証メール: {academicEmail || profile.email}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/40 hidden sm:inline-flex">
+                        学内限定実験へアクセス可能
+                      </Badge>
+                      {/* 🔓 認証解除ボタン */}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={isUnlinking}
+                        onClick={handleUnlinkAcademic}
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1"
+                        title="認証を解除する"
+                      >
+                        <Unlink className="size-3" />
+                        <span>解除</span>
+                      </Button>
                     </div>
                   </div>
-                  <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/40">
-                    全実験・調査へアクセス可能
-                  </Badge>
-                </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <AlertCircle className="size-4 shrink-0" />
+                        <span>大学所属の認証がまだ完了していません</span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        一般メールでログイン中です。学内・研究室限定の実験に参加するには慶應義塾（@keio.jp）での認証が必要です。
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => setKeioDialogOpen(true)}
+                      className="h-8 text-xs font-bold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                    >
+                      <ShieldCheck className="size-3.5" />
+                      <span>慶應所属を認証する</span>
+                    </Button>
+                  </div>
+                )
               ) : (
                 <div className="p-3.5 rounded-xl border border-dashed bg-muted/20 flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">
@@ -516,6 +691,7 @@ export default function ProfilePage() {
               )}
             </div>
 
+            {/* 基本属性情報 */}
             <div className="rounded-2xl border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
@@ -679,7 +855,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* タブ 3: 財布 & アイテム（DB連動） */}
+        {/* タブ 3: 財布 & アイテム */}
         {activeTab === 'wallet' && (
           <div className="space-y-6">
             <div className="rounded-2xl border bg-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -721,7 +897,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* 保持しているアイテム（DBの所持数と連動） */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
                 <Sparkles className="size-4 text-primary" />
@@ -776,7 +951,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* タブ 4: 設定 (Settings) */}
+        {/* タブ 4: 設定 */}
         {activeTab === 'settings' && (
           <div className="rounded-2xl border bg-card p-5 space-y-5">
             <h3 className="text-sm font-bold text-foreground border-b pb-3">アカウント & アプリ設定</h3>
@@ -1110,6 +1285,15 @@ export default function ProfilePage() {
         open={authGuardOpen}
         onOpenChange={setAuthGuardOpen}
         feature="general"
+      />
+
+      {/* 大学所属認証ダイアログ */}
+      <KeioGuardDialog
+        open={keioDialogOpen}
+        onOpenChange={setKeioDialogOpen}
+        userId={user?.id}
+        currentEmail={user?.email}
+        onVerifiedSuccess={handleVerifiedSuccess}
       />
     </div>
   )
