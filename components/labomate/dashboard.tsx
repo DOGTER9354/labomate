@@ -66,7 +66,7 @@ export function Dashboard() {
   // 🔃 リロード処理中ステート
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // 予約済みの実験IDとスロット情報のマップ (expId -> slotId)
+  // 予約済みの実験IDとスロット情報のマップ (expId -> slotTime)
   const [bookings, setBookings] = useState<Record<string, string>>({})
   // ユーザーの応募レコード一覧（直近セッション特定用）
   const [userApplications, setUserApplications] = useState<UserApplicationRecord[]>([])
@@ -175,16 +175,15 @@ export function Dashboard() {
               ? `${item.reward_type ? `${item.reward_type} ` : ''}${formatYen(Number(item.reward_amount))}`
               : item.reward_type || '謝礼なし')
 
-          // ★ 総定員（spotsTotal）の厳密な数値化
+          // ★ 総定員（spotsTotal）
+          const slotsCapacitySum = parsedSlots.reduce((acc, cur) => acc + (Number(cur.capacity) || 0), 0)
           const spotsTotalVal =
             Number(item.spots_total) ||
             Number(item.max_participants) ||
-            (parsedSlots.length > 0
-              ? parsedSlots.reduce((acc, cur) => acc + (Number(cur.capacity) || 0), 0)
-              : 10)
+            (slotsCapacitySum > 0 ? slotsCapacitySum : 10)
 
-          // ★ 残り枠（spotsLeft）の厳密な数値化
-          const spotsLeftVal =
+          // ★ 残り枠（spotsLeft）
+          let spotsLeftVal =
             typeof item.spots_left === 'number'
               ? Number(item.spots_left)
               : item.spots_left !== undefined && item.spots_left !== null
@@ -209,6 +208,8 @@ export function Dashboard() {
             spotsTotal: Math.max(1, spotsTotalVal),
             spots_left: Math.max(0, spotsLeftVal),
             spots_total: Math.max(1, spotsTotalVal),
+            allowMultipleSlots: Boolean(item.allow_multiple_slots),
+            allow_multiple_slots: Boolean(item.allow_multiple_slots),
             requirements: Array.isArray(item.requirements)
               ? item.requirements
               : item.requirements
@@ -265,10 +266,47 @@ export function Dashboard() {
     }
   }, [experiments])
 
+  // ★ 表示用実験リスト：自分が応募済みの実験は確実に「残り枠 -1」「集まり人数 +1」を反映
+  const displayExperiments = useMemo(() => {
+    return experiments.map((exp) => {
+      const isAppliedByMe = exp.id in bookings
+      const expAny = exp as any
+      const total = Number(expAny.spotsTotal ?? expAny.spots_total ?? 10)
+      let left = Number(expAny.spotsLeft ?? expAny.spots_left ?? total)
+
+      // DB側で減算が反映されていない場合でも、自分が応募済みなら最低1枠減っていることを保証
+      if (isAppliedByMe && left === total) {
+        left = Math.max(0, total - 1)
+      }
+
+      // 予約しているスロットの bookedCount も最低 1 を保証
+      let slots = expAny.slots
+      if (Array.isArray(slots) && isAppliedByMe) {
+        const bookedSlotTime = bookings[exp.id]
+        slots = slots.map((s: any) => {
+          if (s.time === bookedSlotTime) {
+            const currentBooked = Number(s.bookedCount ?? 0)
+            return { ...s, bookedCount: Math.max(1, currentBooked) }
+          }
+          return s
+        })
+      }
+
+      return {
+        ...exp,
+        spotsLeft: left,
+        spots_left: left,
+        spotsTotal: total,
+        spots_total: total,
+        slots: slots,
+      } as any
+    })
+  }, [experiments, bookings])
+
   // フィルタリング処理
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return experiments.filter((exp) => {
+    return displayExperiments.filter((exp) => {
       if (modeTab === 'in-person' && exp.mode === 'online') return false
       if (modeTab === 'online' && exp.mode !== 'online') return false
       if (!matchesFilter(exp, filter)) return false
@@ -285,7 +323,7 @@ export function Dashboard() {
         .toLowerCase()
         .includes(q)
     })
-  }, [query, filter, modeTab, experiments])
+  }, [query, filter, modeTab, displayExperiments])
 
   const filterLabel = FILTERS.find((f) => f.id === filter)?.label
 
@@ -295,10 +333,10 @@ export function Dashboard() {
     setDialogOpen(true)
   }
 
-  // 直近の予約セッションを特定（有効なタイトルがある最新の応募）
+  // 直近の予約セッションを特定
   const nextBooking = userApplications.length > 0 ? userApplications[0] : null
   const nextExperiment = nextBooking
-    ? experiments.find((e) => e.id === nextBooking.experiment_id)
+    ? displayExperiments.find((e) => e.id === nextBooking.experiment_id)
     : null
 
   // 実験応募確定処理（即時ローカル更新 ＆ DB再同期）
@@ -311,12 +349,30 @@ export function Dashboard() {
       prev.map((exp) => {
         if (exp.id === experimentId) {
           const expAny = exp as any
-          const currentLeft = Number(expAny.spotsLeft ?? expAny.spots_left ?? 10)
+          const total = Number(expAny.spotsTotal ?? expAny.spots_total ?? 10)
+          const currentLeft = Number(expAny.spotsLeft ?? expAny.spots_left ?? total)
           const newLeft = Math.max(0, currentLeft - 1)
+
+          let rawSlots = expAny.slots
+          if (typeof rawSlots === 'string') {
+            try { rawSlots = JSON.parse(rawSlots) } catch (e) { rawSlots = [] }
+          }
+          let newSlots = Array.isArray(rawSlots) ? [...rawSlots] : []
+          if (newSlots.length > 0) {
+            newSlots = newSlots.map((s: any) => {
+              if (s.id === slotId) {
+                const booked = Number(s.bookedCount ?? 0)
+                return { ...s, bookedCount: booked + 1 }
+              }
+              return s
+            })
+          }
+
           return {
             ...exp,
             spotsLeft: newLeft,
             spots_left: newLeft,
+            slots: newSlots,
           } as any
         }
         return exp
@@ -352,7 +408,7 @@ export function Dashboard() {
     setTimeout(() => {
       fetchUserBookings()
       fetchExperiments()
-    }, 300)
+    }, 400)
   }
 
   return (

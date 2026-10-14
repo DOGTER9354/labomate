@@ -21,6 +21,8 @@ import {
   Loader2,
   Sparkles,
   Users,
+  CheckSquare2,
+  Layers,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -58,6 +60,9 @@ export function CreateExperimentDialog({
   const [description, setDescription] = useState('')
   const [surveyUrl, setSurveyUrl] = useState('')
 
+  // 複数スロット参加の許可設定（デフォルト: false = 1人1スロット限定）
+  const [allowMultipleSlots, setAllowMultipleSlots] = useState<boolean>(false)
+
   // スロット設定（対面実験用）
   const [slots, setSlots] = useState<{ id: string; time: string; capacity: number }[]>([
     { id: '1', time: '10/20 (火) 11:00-11:30', capacity: 3 },
@@ -77,7 +82,6 @@ export function CreateExperimentDialog({
     }
   }, [slots, mode, isTotalManuallyEdited])
 
-  // モード切り替え時の初期値セット
   const handleModeChange = (newMode: 'in-person' | 'online') => {
     setMode(newMode)
     setIsTotalManuallyEdited(false)
@@ -106,14 +110,12 @@ export function CreateExperimentDialog({
     )
   }
 
-  // スロット枠の合計値へワンクリックでリセット
   const handleResetToSlotsTotal = () => {
     const calculated = slots.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
     setTotalSpots(calculated)
     setIsTotalManuallyEdited(false)
   }
 
-  // 金額入力が不要な種別判定（「その他」または「謝礼なし」）
   const isAmountDisabled = rewardType === 'その他' || rewardType === '謝礼なし'
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -143,7 +145,6 @@ export function CreateExperimentDialog({
           ? customRewardType.trim() || 'その他'
           : rewardType
 
-      // 「その他」または「謝礼なし」の場合は金額を 0 に設定
       const finalRewardAmount = isAmountDisabled
         ? 0
         : parseInt(rewardAmount) || 0
@@ -160,6 +161,7 @@ export function CreateExperimentDialog({
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
         spots_total: totalSpots,
         spots_left: totalSpots,
+        allow_multiple_slots: mode === 'in-person' ? allowMultipleSlots : false,
         slots:
           mode === 'in-person'
             ? slots.map((s) => ({
@@ -201,6 +203,7 @@ export function CreateExperimentDialog({
       setDescription('')
       setCustomRewardType('')
       setIsTotalManuallyEdited(false)
+      setAllowMultipleSlots(false)
     } catch (err: any) {
       console.error('Create experiment error:', err)
       setErrorMsg(err.message || '募集の作成に失敗しました。')
@@ -330,7 +333,6 @@ export function CreateExperimentDialog({
               </select>
             </div>
 
-            {/* 謝礼金額（「その他」または「謝礼なし」の場合は入力不要＆グレーアウト） */}
             <div className="space-y-1.5">
               <Label className="text-muted-foreground font-medium">
                 謝礼金額（円）{isAmountDisabled && <span className="text-[10px] text-muted-foreground font-normal">（不要）</span>}
@@ -346,7 +348,6 @@ export function CreateExperimentDialog({
             </div>
           </div>
 
-          {/* 「その他」選択時の詳細入力欄 */}
           {rewardType === 'その他' && (
             <div className="space-y-1.5 text-xs animate-in fade-in duration-200">
               <Label className="font-bold text-foreground">
@@ -359,13 +360,10 @@ export function CreateExperimentDialog({
                 onChange={(e) => setCustomRewardType(e.target.value)}
                 className="text-xs"
               />
-              <p className="text-[10px] text-muted-foreground">
-                ※「その他」を選択した場合は金額の入力は不要です。被験者に渡す物品や特典の内容を入力してください。
-              </p>
             </div>
           )}
 
-          {/* 総募集人数の設定エリア（手動編集可能 & 自動連動表示） */}
+          {/* 総募集人数の設定エリア */}
           <div className="p-3.5 rounded-xl border bg-muted/20 space-y-2 text-xs">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -382,7 +380,6 @@ export function CreateExperimentDialog({
                 </p>
               </div>
 
-              {/* 手動入力フィールド */}
               <div className="flex items-center gap-1.5">
                 <Input
                   type="number"
@@ -398,7 +395,6 @@ export function CreateExperimentDialog({
               </div>
             </div>
 
-            {/* 対面時：手動編集された場合に「スロット合計に戻す」ボタンを提供 */}
             {mode === 'in-person' && isTotalManuallyEdited && (
               <div className="flex justify-end pt-1">
                 <button
@@ -414,7 +410,7 @@ export function CreateExperimentDialog({
 
           {/* スロット設定（対面実験の場合） */}
           {mode === 'in-person' && (
-            <div className="space-y-2 border-t pt-3">
+            <div className="space-y-3 border-t pt-3">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
                   <Calendar className="size-3.5" />
@@ -430,6 +426,32 @@ export function CreateExperimentDialog({
                   <Plus className="size-3" />
                   <span>枠を追加</span>
                 </Button>
+              </div>
+
+              {/* ★ 複数スロット参加の許可設定スイッチ */}
+              <div className="p-3 rounded-xl border bg-card/60 flex items-start justify-between gap-3 text-xs">
+                <div className="space-y-0.5">
+                  <p className="font-bold text-foreground flex items-center gap-1.5">
+                    <Layers className="size-3.5 text-primary" />
+                    <span>複数枠への参加設定</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {allowMultipleSlots
+                      ? '1人の被験者が複数の異なる時間スロットに応募できます（作業系・長期実験向け）'
+                      : '1人の被験者は1つのスロットにしか参加できません（一般的な心理・認知実験向け）'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAllowMultipleSlots((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all shrink-0 ${
+                    allowMultipleSlots
+                      ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                      : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                  }`}
+                >
+                  {allowMultipleSlots ? '複数枠参加: 許可' : '1人1枠限定'}
+                </button>
               </div>
 
               <div className="space-y-2 pt-1">
