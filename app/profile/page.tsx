@@ -24,6 +24,12 @@ import {
   Ticket,
   Rocket,
   Flame,
+  BookOpen,
+  Share2,
+  ExternalLink,
+  ChevronRight,
+  MessageSquare,
+  Building,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,7 +40,7 @@ import { supabase } from '@/lib/supabase'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
-type ActiveTab = 'basic' | 'history' | 'wallet' | 'settings'
+type ActiveTab = 'basic' | 'history' | 'wallet' | 'settings' | 'support'
 
 interface ProfileData {
   name: string
@@ -183,7 +189,7 @@ export default function ProfilePage() {
                 <h1 className="text-xl font-bold text-foreground">{profile.name}</h1>
                 <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5">
                   <ShieldCheck className="size-3.5" />
-                  <span>慶應義塾大学 認証済み</span>
+                  <span>大学所属 認証済み</span>
                 </Badge>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -236,7 +242,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* 4つのタブバー */}
+        {/* 5つのタブバー */}
         <div className="flex items-center gap-6 border-b text-xs sm:text-sm font-semibold text-muted-foreground overflow-x-auto">
           <button
             type="button"
@@ -245,7 +251,7 @@ export default function ProfilePage() {
               activeTab === 'basic' ? 'text-foreground font-bold' : 'hover:text-foreground'
             }`}
           >
-            {isJa ? '基本情報 & 慶應認証' : 'Basic & Keio Auth'}
+            {isJa ? '基本情報' : 'Profile'}
             {activeTab === 'basic' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground rounded-full" />
             )}
@@ -258,7 +264,7 @@ export default function ProfilePage() {
               activeTab === 'history' ? 'text-foreground font-bold' : 'hover:text-foreground'
             }`}
           >
-            {isJa ? '実験履歴' : 'Study History'}
+            {isJa ? '実験履歴' : 'History'}
             {activeTab === 'history' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground rounded-full" />
             )}
@@ -271,7 +277,7 @@ export default function ProfilePage() {
               activeTab === 'wallet' ? 'text-foreground font-bold' : 'hover:text-foreground'
             }`}
           >
-            {isJa ? '財布 & コイン' : 'Wallet & Coins'}
+            {isJa ? '財布 & コイン' : 'Wallet'}
             {activeTab === 'wallet' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground rounded-full" />
             )}
@@ -289,22 +295,35 @@ export default function ProfilePage() {
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground rounded-full" />
             )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('support')}
+            className={`pb-3 transition-colors relative whitespace-nowrap flex items-center gap-1 ${
+              activeTab === 'support' ? 'text-foreground font-bold' : 'hover:text-foreground'
+            }`}
+          >
+            <span>{isJa ? 'サポート & ガイド' : 'Help & Support'}</span>
+            {activeTab === 'support' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground rounded-full" />
+            )}
+          </button>
         </div>
 
-        {/* タブ 1: 基本情報 & 慶應認証 */}
+        {/* タブ 1: 基本情報 & 大学認証 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                    <span>慶應義塾大学 認証バッジ (@keio.jp 認証)</span>
+                    <span>大学ドメイン認証 (@ac.jp / @keio.jp 等)</span>
                     <Badge className="bg-emerald-500/15 text-emerald-500 border-none text-[10px]">
                       認証完了
                     </Badge>
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    慶應義塾の公式メール（@keio.jp）を認証すると、慶應生限定の実験や調査に参加できるようになります。
+                    公式な大学・研究機関メールを認証することで、学内・大学間限定の実験や調査に参加できるようになります。
                   </p>
                 </div>
               </div>
@@ -313,12 +332,12 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-2.5">
                   <CheckCircle2 className="size-4 text-emerald-500" />
                   <div>
-                    <p className="text-xs font-bold text-foreground">慶應義塾大学 認証済み</p>
+                    <p className="text-xs font-bold text-foreground">学生・研究機関 認証済み</p>
                     <p className="text-[11px] text-muted-foreground font-mono">{profile.email}</p>
                   </div>
                 </div>
                 <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/40">
-                  慶應生限定案件へアクセス可能
+                  全実験・調査へアクセス可能
                 </Badge>
               </div>
             </div>
@@ -360,7 +379,7 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-muted-foreground font-medium">所属学部・研究科</label>
+                  <label className="text-muted-foreground font-medium">所属大学・学部・研究科</label>
                   <Input
                     readOnly={!isEditing}
                     value={formData.faculty}
@@ -667,6 +686,188 @@ export default function ProfilePage() {
                 </Button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* タブ 5: サポート & ガイド（Support & Help） */}
+        {activeTab === 'support' && (
+          <div className="space-y-6">
+            {/* 1. マニュアル・ガイド */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <BookOpen className="size-4 text-primary" />
+                <h3 className="text-sm font-bold text-foreground">
+                  {isJa ? 'ご利用ガイド & マニュアル' : 'User Manual & Guides'}
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="rounded-xl border bg-card p-4 space-y-2 hover:border-primary/40 transition-colors">
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">被験者向け</Badge>
+                  <h4 className="font-bold text-foreground text-sm">実験・調査への参加ステップ</h4>
+                  <p className="text-muted-foreground leading-relaxed text-[11px]">
+                    1. 「探す」から空きコマや関心のある実験・調査を検索<br />
+                    2. 希望の時間帯スロットを選択して応募確定<br />
+                    3. 当日に会場またはオンラインで参加し、謝礼＆Labo Coinを獲得
+                  </p>
+                </div>
+
+                <div className="rounded-xl border bg-card p-4 space-y-2 hover:border-primary/40 transition-colors">
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">研究者向け</Badge>
+                  <h4 className="font-bold text-foreground text-sm">実験募集・参加枠の管理</h4>
+                  <p className="text-muted-foreground leading-relaxed text-[11px]">
+                    1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
+                    2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
+                    3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* 2. 公式SNS */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Share2 className="size-4 text-primary" />
+                <h3 className="text-sm font-bold text-foreground">
+                  {isJa ? '公式SNS・最新情報' : 'Official Social Channels'}
+                </h3>
+              </div>
+
+              <div className="rounded-2xl border bg-card divide-y text-xs">
+                {/* 公式X */}
+                <a
+                  href="https://x.com/Labomate1005"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-4 flex items-center justify-between hover:bg-muted/40 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-9 items-center justify-center rounded-xl bg-foreground text-background font-bold text-sm">
+                      𝕏
+                    </div>
+                    <div>
+                      <p className="font-bold text-foreground flex items-center gap-1.5">
+                        <span>公式 X (@Labomate1005)</span>
+                        <ExternalLink className="size-3 text-muted-foreground group-hover:text-foreground" />
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        急募実験のリアルタイム配信、新機能アップデート、運営速報
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="size-4 text-muted-foreground" />
+                </a>
+
+                {/* 公式Instagram */}
+                <a
+                  href="https://instagram.com/labomate1005?obrf=MXNneWc1cXNsazRl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-4 flex items-center justify-between hover:bg-muted/40 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white font-bold text-sm">
+                      IG
+                    </div>
+                    <div>
+                      <p className="font-bold text-foreground flex items-center gap-1.5">
+                        <span>公式 Instagram (@labomate1005)</span>
+                        <ExternalLink className="size-3 text-muted-foreground group-hover:text-foreground" />
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        実験・研究の裏側紹介、活用Tips、イベント情報
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="size-4 text-muted-foreground" />
+                </a>
+              </div>
+            </section>
+
+            {/* 3. お問い合わせ窓口 */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Mail className="size-4 text-primary" />
+                <h3 className="text-sm font-bold text-foreground">
+                  {isJa ? 'お問い合わせ・サポート' : 'Contact & Support'}
+                </h3>
+              </div>
+
+              <div className="rounded-2xl border bg-card p-5 space-y-4 text-xs">
+                <p className="text-muted-foreground leading-relaxed">
+                  サービスに関するご質問・ご要望、不具合報告、研究室単位での導入・共同実験のご相談などはお気軽にご連絡ください。
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <a
+                    href="mailto:labomate1005@gmail.com"
+                    className="p-3.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center gap-3"
+                  >
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Mail className="size-4" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-foreground">運営事務局へメール</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">labomate1005@gmail.com</p>
+                    </div>
+                  </a>
+
+                  <a
+                    href="https://forms.gle"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-3.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center gap-3"
+                  >
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+                      <MessageSquare className="size-4" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-foreground flex items-center gap-1">
+                        <span>Webお問い合わせフォーム</span>
+                        <ExternalLink className="size-3 text-muted-foreground" />
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">Google Formsより24時間受付</p>
+                    </div>
+                  </a>
+                </div>
+              </div>
+            </section>
+
+            {/* 4. 運営組織・基本情報 */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Building className="size-4 text-primary" />
+                <h3 className="text-sm font-bold text-foreground">
+                  {isJa ? '運営組織・プライバシー方針' : 'Organization & Policy'}
+                </h3>
+              </div>
+
+              <div className="rounded-2xl border bg-card p-5 space-y-3 text-xs">
+                <div className="flex items-center justify-between pb-3 border-b">
+                  <span className="text-muted-foreground">サービス名</span>
+                  <span className="font-bold text-foreground">Labomate (ラボメイト)</span>
+                </div>
+                <div className="flex items-center justify-between pb-3 border-b">
+                  <span className="text-muted-foreground">運営組織</span>
+                  <span className="font-bold text-foreground">Labomate Project (大学間研究・実験支援プラットフォーム)</span>
+                </div>
+                <div className="flex items-center justify-between pb-3 border-b">
+                  <span className="text-muted-foreground">展開エリア</span>
+                  <span className="font-medium text-foreground">全国の大学・研究機関（先行：慶應義塾大学 各キャンパス）</span>
+                </div>
+                <div className="flex items-center justify-between pb-3 border-b">
+                  <span className="text-muted-foreground">研究倫理・セキュリティ</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <ShieldCheck className="size-3.5" />
+                    <span>各大学の研究倫理規程・個人情報保護法に準拠</span>
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">バージョン</span>
+                  <span className="font-mono text-muted-foreground">v1.2.0 (Academic Release)</span>
+                </div>
+              </div>
+            </section>
           </div>
         )}
       </main>
