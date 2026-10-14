@@ -33,7 +33,7 @@ import {
   Building,
   User,
   LogIn,
-  Loader2,
+  AlertCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -42,6 +42,7 @@ import { useLanguage } from '@/lib/language-context'
 import { useTheme } from '@/lib/theme-context'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
+import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
@@ -72,20 +73,21 @@ export default function ProfilePage() {
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
   const { theme, setTheme } = useTheme()
-  const { user, loading: authLoading, signOut } = useAuth()
+  const { user, signOut } = useAuth()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('basic')
   const [isEditing, setIsEditing] = useState(false)
+  const [authGuardOpen, setAuthGuardOpen] = useState(false)
 
-  // プロフィール情報
+  // プロフィール情報（ゲスト用デフォルト）
   const [profile, setProfile] = useState<ProfileData>({
-    name: '周誠',
-    email: 'student@keio.jp',
-    faculty: '環境情報学部',
-    grade: 'B3',
+    name: 'ゲストユーザー',
+    email: '未ログイン',
+    faculty: '未設定',
+    grade: '未設定',
     dominantHand: '右利き',
     vision: '裸眼',
-    laboCoins: 450,
+    laboCoins: 0,
   })
 
   // 編集用一時フォーム状態
@@ -100,48 +102,56 @@ export default function ProfilePage() {
 
   // Supabase Auth のログインユーザー情報およびローカルストレージを同期
   useEffect(() => {
-    let baseProfile: ProfileData = {
-      name: '周誠',
-      email: 'student@keio.jp',
-      faculty: '環境情報学部',
-      grade: 'B3',
-      dominantHand: '右利き',
-      vision: '裸眼',
-      laboCoins: 450,
-    }
-
-    try {
-      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        baseProfile = { ...baseProfile, ...JSON.parse(cached) }
-      }
-    } catch (e) {
-      console.error(e)
-    }
-
-    // ログインユーザーが存在する場合は優先反映
     if (user) {
-      const meta = user.user_metadata || {}
-      baseProfile.email = user.email || baseProfile.email
-      if (meta.full_name) baseProfile.name = meta.full_name
-      if (meta.faculty) baseProfile.faculty = meta.faculty
-    }
+      let baseProfile: ProfileData = {
+        name: user.user_metadata?.full_name || '学生ユーザー',
+        email: user.email || '',
+        faculty: user.user_metadata?.faculty || '未設定',
+        grade: '学部生',
+        dominantHand: '右利き',
+        vision: '裸眼',
+        laboCoins: 350,
+      }
 
-    setProfile(baseProfile)
-    setFormData(baseProfile)
+      try {
+        const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
+        if (cached) {
+          baseProfile = { ...baseProfile, ...JSON.parse(cached) }
+        }
+      } catch (e) {
+        console.error(e)
+      }
+
+      setProfile(baseProfile)
+      setFormData(baseProfile)
+    } else {
+      // 未ログイン時の表示
+      const guestProfile: ProfileData = {
+        name: 'ゲストユーザー',
+        email: 'ログインしていません',
+        faculty: '未登録',
+        grade: '未設定',
+        dominantHand: '未設定',
+        vision: '未設定',
+        laboCoins: 0,
+      }
+      setProfile(guestProfile)
+      setFormData(guestProfile)
+    }
   }, [user])
 
-  // 履歴取得
+  // 履歴取得（ログイン時のみ実行）
   const fetchHistory = useCallback(async () => {
+    if (!user) {
+      setHistory([])
+      return
+    }
     setLoadingHistory(true)
-    const emailToQuery = user?.email || profile.email
-    const nameToQuery = profile.name
-
     try {
       const { data, error } = await supabase
         .from('applications')
         .select('*')
-        .or(`applicant_email.eq.${emailToQuery},applicant_name.eq.${nameToQuery}`)
+        .or(`applicant_email.eq.${user.email},applicant_name.eq.${profile.name}`)
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
@@ -152,7 +162,7 @@ export default function ProfilePage() {
     } finally {
       setLoadingHistory(false)
     }
-  }, [user?.email, profile.email, profile.name])
+  }, [user, profile.name])
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -160,8 +170,22 @@ export default function ProfilePage() {
     }
   }, [activeTab, fetchHistory])
 
+  // プロフィール編集の開始（未ログイン時はガード）
+  const handleStartEdit = () => {
+    if (!user) {
+      setAuthGuardOpen(true)
+      return
+    }
+    setIsEditing(true)
+  }
+
   // プロフィール編集の保存
   const handleSaveProfile = async () => {
+    if (!user) {
+      setAuthGuardOpen(true)
+      return
+    }
+
     setProfile(formData)
     try {
       const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
@@ -171,15 +195,12 @@ export default function ProfilePage() {
         JSON.stringify({ ...current, ...formData })
       )
 
-      // ログイン中の場合は Supabase Auth のメタデータも更新
-      if (user) {
-        await supabase.auth.updateUser({
-          data: {
-            full_name: formData.name,
-            faculty: formData.faculty,
-          },
-        })
-      }
+      await supabase.auth.updateUser({
+        data: {
+          full_name: formData.name,
+          faculty: formData.faculty,
+        },
+      })
     } catch (e) {
       console.error(e)
     }
@@ -201,59 +222,10 @@ export default function ProfilePage() {
     }
   }
 
-  // 認証ローディング中
-  if (authLoading) {
-    return (
-      <div className="min-h-dvh bg-background flex items-center justify-center">
-        <Loader2 className="size-6 animate-spin text-primary" />
-      </div>
-    )
-  }
-
-  // 未ログイン時の案内表示
-  if (!user) {
-    return (
-      <div className="min-h-dvh bg-background text-foreground flex flex-col justify-center items-center px-4 py-16">
-        <div className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-sm text-center space-y-4">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <User className="size-6" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-base sm:text-lg font-bold text-foreground">
-              {isJa ? 'ログインが必要です' : 'Sign in Required'}
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {isJa
-                ? 'マイページの確認や実験の応募・管理にはログインまたは新規登録が必要です。'
-                : 'Please sign in to view your profile, manage bookings, and earn Labo Coins.'}
-            </p>
-          </div>
-
-          <div className="pt-2 flex flex-col gap-2">
-            <Button
-              onClick={() => router.push('/login')}
-              className="w-full h-10 text-xs font-bold gap-1.5 bg-primary text-primary-foreground"
-            >
-              <LogIn className="size-4" />
-              <span>{isJa ? 'ログイン / 新規登録へ' : 'Sign In / Register'}</span>
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => router.push('/')}
-              className="w-full h-10 text-xs font-semibold"
-            >
-              {isJa ? 'トップ（探す）に戻る' : 'Back to Explore'}
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-dvh bg-background text-foreground pb-24">
       {/* 画面トップバー */}
-      <div className="border-b bg-card/40 backdrop-blur px-4 py-3 sm:px-8">
+      <div className="border-b bg-card/40 backdrop-blur px-4 py-3 sm:px-8 sticky top-0 z-30">
         <div className="mx-auto max-w-4xl flex items-center justify-between">
           <Link
             href="/"
@@ -271,19 +243,48 @@ export default function ProfilePage() {
       </div>
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:px-8 space-y-6">
+        {/* 未ログイン時バナー */}
+        {!user && (
+          <div className="p-4 rounded-2xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <p className="font-bold text-foreground flex items-center gap-1.5">
+                <Sparkles className="size-4 text-primary" />
+                <span>ゲストモードで閲覧中</span>
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                ログインするとプロフィールの登録、実験履歴の同期、Labo Coinsの獲得・利用が可能になります。
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => router.push('/login')}
+              className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground shrink-0 self-start sm:self-auto"
+            >
+              <LogIn className="size-3.5" />
+              <span>ログイン / 新規登録</span>
+            </Button>
+          </div>
+        )}
+
         {/* プロフィール基本ヘッダーカード */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6">
           <div className="flex items-center gap-4">
             <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 font-bold text-lg text-primary">
-              {profile.name ? profile.name.slice(0, 1) : <User className="size-6" />}
+              {user && profile.name ? profile.name.slice(0, 1) : <User className="size-6 text-muted-foreground" />}
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold text-foreground">{profile.name}</h1>
-                <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5">
-                  <ShieldCheck className="size-3.5" />
-                  <span>大学所属 認証済み</span>
-                </Badge>
+                {user ? (
+                  <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5">
+                    <ShieldCheck className="size-3.5" />
+                    <span>大学所属 認証済み</span>
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                    未ログイン
+                  </Badge>
+                )}
               </div>
               <p className="text-xs text-muted-foreground">
                 {profile.faculty} · {profile.grade} · {profile.email}
@@ -291,37 +292,48 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* 編集ボタン */}
+          {/* 編集ボタン または ログインボタン */}
           <div>
-            {isEditing ? (
-              <div className="flex items-center gap-2">
+            {user ? (
+              isEditing ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCancelEdit}
+                    className="h-8 text-xs gap-1"
+                  >
+                    <X className="size-3.5" />
+                    <span>{isJa ? 'キャンセル' : 'Cancel'}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveProfile}
+                    className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground"
+                  >
+                    <Save className="size-3.5" />
+                    <span>{isJa ? '保存する' : 'Save'}</span>
+                  </Button>
+                </div>
+              ) : (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={handleCancelEdit}
-                  className="h-8 text-xs gap-1"
+                  onClick={handleStartEdit}
+                  className="h-8 text-xs font-semibold gap-1.5"
                 >
-                  <X className="size-3.5" />
-                  <span>{isJa ? 'キャンセル' : 'Cancel'}</span>
+                  <Edit3 className="size-3.5" />
+                  <span>{isJa ? 'プロフィールを編集' : 'Edit Profile'}</span>
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={handleSaveProfile}
-                  className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground"
-                >
-                  <Save className="size-3.5" />
-                  <span>{isJa ? '保存する' : 'Save'}</span>
-                </Button>
-              </div>
+              )
             ) : (
               <Button
                 size="sm"
-                variant="outline"
-                onClick={() => setIsEditing(true)}
-                className="h-8 text-xs font-semibold gap-1.5"
+                onClick={() => router.push('/login')}
+                className="h-8 text-xs font-bold gap-1.5 bg-primary text-primary-foreground"
               >
-                <Edit3 className="size-3.5" />
-                <span>{isJa ? 'プロフィールを編集' : 'Edit Profile'}</span>
+                <LogIn className="size-3.5" />
+                <span>{isJa ? 'ログインして設定' : 'Sign In to Edit'}</span>
               </Button>
             )}
           </div>
@@ -370,7 +382,7 @@ export default function ProfilePage() {
               activeTab === 'wallet' ? 'text-foreground font-bold' : 'hover:text-foreground'
             }`}
           >
-            {isJa ? '財布 & コイン' : 'Wallet'}
+            {isJa ? '財布 & アイテム' : 'Wallet & Items'}
             {activeTab === 'wallet' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground rounded-full" />
             )}
@@ -406,14 +418,21 @@ export default function ProfilePage() {
         {/* タブ 1: 基本情報 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
+            {/* 大学認証ステータス */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                     <span>大学ドメイン認証 (@ac.jp / @keio.jp 等)</span>
-                    <Badge className="bg-emerald-500/15 text-emerald-500 border-none text-[10px]">
-                      認証完了
-                    </Badge>
+                    {user ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-500 border-none text-[10px]">
+                        認証完了
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-[10px]">
+                        未ログイン
+                      </Badge>
+                    )}
                   </h3>
                   <p className="text-xs text-muted-foreground">
                     公式な大学・研究機関メールを認証することで、学内・大学間限定の実験や調査に参加できるようになります。
@@ -421,20 +440,37 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <CheckCircle2 className="size-4 text-emerald-500" />
-                  <div>
-                    <p className="text-xs font-bold text-foreground">学生・研究機関 認証済み</p>
-                    <p className="text-[11px] text-muted-foreground font-mono">{profile.email}</p>
+              {user ? (
+                <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="size-4 text-emerald-500" />
+                    <div>
+                      <p className="text-xs font-bold text-foreground">学生・研究機関 認証済み</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">{profile.email}</p>
+                    </div>
                   </div>
+                  <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/40">
+                    全実験・調査へアクセス可能
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/40">
-                  全実験・調査へアクセス可能
-                </Badge>
-              </div>
+              ) : (
+                <div className="p-3.5 rounded-xl border border-dashed bg-muted/20 flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    認証を行うにはアカウント登録またはログインが必要です
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push('/login')}
+                    className="h-7 text-xs font-semibold"
+                  >
+                    ログインして認証
+                  </Button>
+                </div>
+              )}
             </div>
 
+            {/* 基本属性情報 */}
             <div className="rounded-2xl border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
@@ -443,11 +479,15 @@ export default function ProfilePage() {
                     実験応募時の条件スクリーニングや自動入力に使用されます。
                   </p>
                 </div>
-                {isEditing && (
+                {!user ? (
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                    ログイン後に編集可能
+                  </Badge>
+                ) : isEditing ? (
                   <Badge variant="secondary" className="text-[10px]">
                     編集中
                   </Badge>
-                )}
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -467,7 +507,6 @@ export default function ProfilePage() {
                     readOnly={true}
                     value={formData.email}
                     className="bg-muted/40 cursor-default focus-visible:ring-0 text-muted-foreground"
-                    title="メールアドレスの変更は設定タブから申請してください"
                   />
                 </div>
 
@@ -520,10 +559,34 @@ export default function ProfilePage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-foreground">参加・応募履歴</h3>
-              <span className="text-xs text-muted-foreground">{history.length} 件</span>
+              <span className="text-xs text-muted-foreground">
+                {user ? `${history.length} 件` : '未ログイン'}
+              </span>
             </div>
 
-            {loadingHistory ? (
+            {!user ? (
+              <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-3">
+                <div className="mx-auto flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Clock className="size-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-foreground">
+                    ログインすると実験の参加履歴が保存されます
+                  </p>
+                  <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                    応募した実験の日時確認、集合場所、ステータス（確定・完了）をいつでも確認できます。
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => router.push('/login')}
+                  className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground"
+                >
+                  <LogIn className="size-3.5" />
+                  <span>ログインして履歴を管理</span>
+                </Button>
+              </div>
+            ) : loadingHistory ? (
               <div className="py-12 text-center text-xs text-muted-foreground">読み込み中...</div>
             ) : history.length === 0 ? (
               <div className="rounded-2xl border border-dashed p-8 text-center text-xs text-muted-foreground">
@@ -594,6 +657,25 @@ export default function ProfilePage() {
               </Button>
             </div>
 
+            {!user && (
+              <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs space-y-2">
+                <p className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                  <AlertCircle className="size-4" />
+                  <span>未ログイン状態です</span>
+                </p>
+                <p className="text-muted-foreground text-[11px] leading-relaxed">
+                  実験参加によるコイン獲得やブーストアイテムの保持・交換にはアカウント登録が必要です。
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => router.push('/login')}
+                  className="h-7 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white"
+                >
+                  ログインしてコインを貯める
+                </Button>
+              </div>
+            )}
+
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
                 <Sparkles className="size-4 text-primary" />
@@ -659,9 +741,20 @@ export default function ProfilePage() {
                   </p>
                   <p className="text-[11px] text-muted-foreground">現在: {profile.email}</p>
                 </div>
-                <Button size="sm" variant="outline" className="h-8 text-xs self-start sm:self-auto">
-                  変更を申請
-                </Button>
+                {user ? (
+                  <Button size="sm" variant="outline" className="h-8 text-xs self-start sm:self-auto">
+                    変更を申請
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push('/login')}
+                    className="h-8 text-xs font-semibold self-start sm:self-auto"
+                  >
+                    ログイン
+                  </Button>
+                )}
               </div>
 
               {/* 2. パスワード変更 */}
@@ -673,12 +766,23 @@ export default function ProfilePage() {
                   </p>
                   <p className="text-[11px] text-muted-foreground">アカウントのセキュリティ設定を更新します</p>
                 </div>
-                <Button size="sm" variant="outline" className="h-8 text-xs self-start sm:self-auto">
-                  パスワードを変更
-                </Button>
+                {user ? (
+                  <Button size="sm" variant="outline" className="h-8 text-xs self-start sm:self-auto">
+                    パスワードを変更
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push('/login')}
+                    className="h-8 text-xs font-semibold self-start sm:self-auto"
+                  >
+                    ログイン
+                  </Button>
+                )}
               </div>
 
-              {/* 3. 表示言語 */}
+              {/* 3. 表示言語（未ログインでも自由に変更可能） */}
               <div className="flex items-center justify-between pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -707,7 +811,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* 4. 外観テーマ（表示言語の下） */}
+              {/* 4. 外観テーマ（未ログインでも自由に変更可能） */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -753,31 +857,33 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* 5. ログアウト */}
-              <div className="flex items-center justify-between pt-1">
-                <div className="space-y-0.5">
-                  <p className="font-bold text-destructive flex items-center gap-1.5">
-                    <LogOut className="size-3.5" />
-                    <span>ログアウト</span>
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    アカウントからサインアウトします
-                  </p>
+              {/* 5. ログアウト（ログイン時のみ表示） */}
+              {user && (
+                <div className="flex items-center justify-between pt-1">
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-destructive flex items-center gap-1.5">
+                      <LogOut className="size-3.5" />
+                      <span>ログアウト</span>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      アカウントからサインアウトします
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleSignOut}
+                    className="h-8 text-xs font-semibold"
+                  >
+                    ログアウト
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={handleSignOut}
-                  className="h-8 text-xs font-semibold"
-                >
-                  ログアウト
-                </Button>
-              </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* タブ 5: サポート & ガイド（Support & Help） */}
+        {/* タブ 5: サポート & ガイド（誰でも完全閲覧可能） */}
         {activeTab === 'support' && (
           <div className="space-y-6">
             {/* 1. マニュアル・ガイド */}
@@ -822,6 +928,7 @@ export default function ProfilePage() {
               </div>
 
               <div className="rounded-2xl border bg-card divide-y text-xs">
+                {/* 公式X */}
                 <a
                   href="https://x.com/Labomate1005"
                   target="_blank"
@@ -845,6 +952,7 @@ export default function ProfilePage() {
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </a>
 
+                {/* 公式Instagram */}
                 <a
                   href="https://instagram.com/labomate1005?obrf=MXNneWc1cXNsazRl"
                   target="_blank"
@@ -957,6 +1065,13 @@ export default function ProfilePage() {
           </div>
         )}
       </main>
+
+      {/* ログインガードダイアログ */}
+      <AuthGuardDialog
+        open={authGuardOpen}
+        onOpenChange={setAuthGuardOpen}
+        feature="general"
+      />
     </div>
   )
 }
