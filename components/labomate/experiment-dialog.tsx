@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import {
   Calendar,
   Clock,
@@ -9,6 +10,8 @@ import {
   ExternalLink,
   CheckCircle2,
   AlertCircle,
+  LogIn,
+  Coins,
 } from 'lucide-react'
 import {
   Dialog,
@@ -22,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
+import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 import { formatYen, type Experiment } from '@/lib/experiments'
 
@@ -46,6 +50,7 @@ export function ExperimentDialog({
 }: ExperimentDialogProps) {
   const { language } = useLanguage()
   const isJa = language === 'ja'
+  const { user } = useAuth()
 
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(bookedSlotId || null)
   const [completionCodeInput, setCompletionCodeInput] = useState('')
@@ -96,17 +101,34 @@ export function ExperimentDialog({
 
   if (!experiment) return null
 
-  const getUserProfile = () => {
+  // 応募者の情報を取得（ログインユーザー優先、次にローカルストレージ、最後にデフォルト）
+  const getApplicantData = () => {
+    if (user) {
+      return {
+        name: user.user_metadata?.full_name || '学生ユーザー',
+        email: user.email || 'student@university.ac.jp',
+        faculty: user.user_metadata?.faculty || '未設定',
+      }
+    }
+
     try {
       const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) return JSON.parse(cached)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        return {
+          name: parsed.name || 'ゲスト参加者',
+          email: parsed.email || 'guest@example.com',
+          faculty: parsed.faculty || '未設定',
+        }
+      }
     } catch (e) {
       console.error(e)
     }
+
     return {
-      name: '周誠',
-      email: 'student@keio.jp',
-      faculty: '総合政策学部',
+      name: 'ゲスト参加者',
+      email: 'guest@example.com',
+      faculty: '未設定',
     }
   }
 
@@ -155,14 +177,14 @@ export function ExperimentDialog({
     setIsSubmitting(true)
 
     try {
-      const user = getUserProfile()
+      const applicant = getApplicantData()
 
       const applicationPayload: Record<string, any> = {
         experiment_id: experiment.id,
         experiment_title: experiment.title,
-        applicant_name: user.name || '周誠',
-        applicant_email: user.email || 'student@keio.jp',
-        faculty: user.faculty || '慶應義塾大学',
+        applicant_name: applicant.name,
+        applicant_email: applicant.email,
+        faculty: applicant.faculty,
         format: isOnline ? 'オンライン' : '対面',
         status: isOnline ? '提出済み' : '予約完了',
         slot_id: selectedSlot?.id || (isOnline ? 'online' : null),
@@ -191,7 +213,13 @@ export function ExperimentDialog({
         console.error('Failed to decrement spots_left:', updateErr)
       }
 
-      setSuccessMsg(isJa ? '応募が完了しました！' : 'Application successful!')
+      setSuccessMsg(
+        isJa
+          ? user
+            ? '応募が完了しました！マイページに履歴が保存されました。'
+            : '応募が完了しました！'
+          : 'Application successful!'
+      )
       if (onApplied) onApplied(experiment.id)
       if (onConfirm) onConfirm(experiment.id, selectedSlot?.id || 'online')
 
@@ -255,6 +283,31 @@ export function ExperimentDialog({
         </DialogHeader>
 
         <div className="space-y-4 pt-2">
+          {/* 未ログイン時のコイン付与対象外アラート */}
+          {!user && (
+            <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs space-y-1.5 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                  <Coins className="size-4 shrink-0" />
+                  <span>{isJa ? 'コイン獲得に関するご案内' : 'Labo Coins Notice'}</span>
+                </span>
+                <Link
+                  href="/login"
+                  onClick={() => onOpenChange(false)}
+                  className="text-[11px] font-bold text-primary hover:underline flex items-center gap-0.5"
+                >
+                  <span>{isJa ? 'ログインする' : 'Sign In'}</span>
+                  <LogIn className="size-3" />
+                </Link>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {isJa
+                  ? '現在未ログインです。このまま応募しても Labo Coins は獲得・保持されません。コインを貯めてブーストアイテムと交換するにはログイン後の応募をおすすめします。'
+                  : 'You are currently not signed in. Labo Coins will not be credited without an account.'}
+              </p>
+            </div>
+          )}
+
           {/* 基本スペック */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 p-3 rounded-xl bg-muted/30 border text-xs">
             <div>
