@@ -1,220 +1,244 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import {
+  ArrowLeft,
   Coins,
+  Sparkles,
   Rocket,
   Flame,
-  Coffee,
-  BookOpen,
-  Sparkles,
-  ArrowRight,
-  Clock,
-  Info,
+  CheckCircle2,
+  LogIn,
+  AlertCircle,
+  HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
+import { useAuth } from '@/lib/auth-context'
+import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
-
-interface ShopItem {
-  id: string
-  title: string
-  category: 'boost' | 'reward'
-  cost: number
-  description: string
-  icon: any
-  tag?: string
-}
 
 export default function ShopPage() {
   const { language } = useLanguage()
   const isJa = language === 'ja'
+  const { user } = useAuth()
 
-  const [coins, setCoins] = useState<number>(350)
+  const [laboCoins, setLaboCoins] = useState<number>(user ? 350 : 0)
+  const [authGuardOpen, setAuthGuardOpen] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => {
+    if (user) {
+      try {
+        const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (typeof parsed.laboCoins === 'number') {
+            setLaboCoins(parsed.laboCoins)
+          }
+        }
+      } catch (e) {
+        console.error(e)
+      }
+    } else {
+      setLaboCoins(0)
+    }
+  }, [user])
+
+  const handleExchange = (cost: number, itemName: string) => {
+    if (!user) {
+      setAuthGuardOpen(true)
+      return
+    }
+
+    if (laboCoins < cost) {
+      setMessage(isJa ? 'コインが不足しています。実験に参加してコインを獲得しましょう！' : 'Not enough coins!')
+      setTimeout(() => setMessage(null), 3000)
+      return
+    }
+
+    const nextCoins = laboCoins - cost
+    setLaboCoins(nextCoins)
     try {
       const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (typeof parsed.laboCoins === 'number') {
-          setCoins(parsed.laboCoins)
-        }
-      }
+      const parsed = cached ? JSON.parse(cached) : {}
+      localStorage.setItem(
+        PROFILE_STORAGE_KEY,
+        JSON.stringify({ ...parsed, laboCoins: nextCoins })
+      )
     } catch (e) {
       console.error(e)
     }
-  }, [])
 
-  const items: ShopItem[] = [
-    {
-      id: 'top-pin',
-      title: isJa ? '24時間 最上部固定ピン' : '24h Top Pin Boost',
-      category: 'boost',
-      cost: 300,
-      description: isJa
-        ? 'あなたの実験募集を一覧の1番上に24時間固定。被験者の目に留まりやすくなります。'
-        : 'Pin your study to the top of the feed for 24 hours to maximize exposure.',
-      icon: Rocket,
-      tag: isJa ? '人気' : 'Popular',
-    },
-    {
-      id: 'urgent-badge',
-      title: isJa ? '「🔥 急募」アピールバッジ' : 'Urgent Callout Badge',
-      category: 'boost',
-      cost: 150,
-      description: isJa
-        ? '枠が埋まりにくいスロットに急募フラグを立てて、優先参加を促します。'
-        : 'Highlight difficult-to-fill slots with an urgent alert badge.',
-      icon: Flame,
-    },
-    {
-      id: 'sfc-cafe',
-      title: isJa ? 'SFC生協 カフェドリンク券' : 'Co-op Cafe Drink Voucher',
-      category: 'reward',
-      cost: 200,
-      description: isJa
-        ? '学内生協カフェで使えるドリンク1杯無料引換デジタルチケット。'
-        : 'A digital voucher for one complimentary beverage at the campus cafe.',
-      icon: Coffee,
-      tag: isJa ? '学内限定' : 'Campus Only',
-    },
-    {
-      id: 'coop-discount',
-      title: isJa ? '生協書籍 5%OFFクーポン' : 'Bookstore 5% Discount',
-      category: 'reward',
-      cost: 150,
-      description: isJa
-        ? '慶應生協の書籍売り場で使える追加割引クーポン。'
-        : 'An extra 5% off coupon at Keio Co-op bookstores.',
-      icon: BookOpen,
-    },
-  ]
+    setMessage(isJa ? `「${itemName}」と交換しました！` : `Exchanged for ${itemName}!`)
+    setTimeout(() => setMessage(null), 3000)
+  }
 
   return (
     <div className="min-h-dvh bg-background text-foreground pb-24">
-      {/* 画面ヘッダー */}
-      <header className="border-b bg-card/60 backdrop-blur sticky top-0 z-30 px-4 py-4 sm:px-8">
-        <div className="mx-auto max-w-5xl flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-              <Sparkles className="size-5 text-amber-500" />
-              <span>{isJa ? 'アイテムショップ' : 'Item Shop'}</span>
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isJa
-                ? '実験参加で獲得したコインを、募集ブーストや学内特典に交換できます。'
-                : 'Redeem your earned Labo Coins for study boosts and campus perks.'}
-            </p>
-          </div>
-
-          {/* 保有コイン残高 */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold text-sm shadow-xs shrink-0">
-            <Coins className="size-4 text-amber-500" />
-            <span>{coins} LC</span>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-8 space-y-6">
-        {/* Coming Soon 案内バナー */}
-        <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 text-xs flex items-center gap-2.5">
-          <Info className="size-4 text-primary shrink-0" />
-          <div className="space-y-0.5">
-            <p className="font-bold text-foreground">
-              {isJa ? 'ショップ機能は現在準備中です（近日公開予定）' : 'Shop items are currently in preparation (Coming Soon)'}
-            </p>
-            <p className="text-muted-foreground text-[11px]">
-              {isJa
-                ? '生協や各研究室との連携準備を進めています。実験や調査に参加して、今のうちに Labo Coin をたくさん貯めておきましょう！'
-                : 'Co-op and lab perks are coming soon. Join studies to stockpile Labo Coins in the meantime!'}
-            </p>
-          </div>
-        </div>
-
-        {/* コイン獲得のヒントバナー */}
-        <div className="rounded-2xl border bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="space-y-0.5">
-            <p className="font-bold text-foreground flex items-center gap-1.5">
-              <Coins className="size-4 text-amber-500" />
-              <span>{isJa ? 'コインをもっと貯めるには？' : 'How to earn more Labo Coins?'}</span>
-            </p>
-            <p className="text-muted-foreground text-[11px]">
-              {isJa
-                ? '学内対面実験への参加で +100 LC、オンライン調査への回答で +20 LC が即時付与されます。'
-                : 'Earn +100 LC for in-person lab experiments and +20 LC for online surveys.'}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => (window.location.href = '/')}
-            className="h-8 text-xs font-bold gap-1 self-start sm:self-auto shrink-0"
+      {/* 画面トップバー */}
+      <div className="border-b bg-card/40 backdrop-blur px-4 py-3 sm:px-8 sticky top-0 z-30">
+        <div className="mx-auto max-w-4xl flex items-center justify-between">
+          <Link
+            href="/"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
           >
-            <span>{isJa ? '実験を探す' : 'Find Studies'}</span>
-            <ArrowRight className="size-3" />
-          </Button>
+            <ArrowLeft className="size-4" />
+            <span>{isJa ? '探す（トップ）に戻る' : 'Back to Explore'}</span>
+          </Link>
+
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-500 font-bold text-xs">
+            <Coins className="size-3.5" />
+            <span>{laboCoins} Labo Coins</span>
+          </div>
         </div>
+      </div>
 
-        {/* アイテム一覧グリッド（Coming Soon 表示） */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {items.map((item) => {
-            const Icon = item.icon
+      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-8 space-y-6">
+        {/* 未ログイン時バナー */}
+        {!user && (
+          <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <p className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                <Sparkles className="size-4" />
+                <span>未ログイン状態です</span>
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                実験やアンケートに参加してコインを獲得・保持したり、アイテムを交換するにはログインが必要です。
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setAuthGuardOpen(true)}
+              className="h-8 text-xs font-bold gap-1 bg-amber-500 hover:bg-amber-600 text-white shrink-0 self-start sm:self-auto"
+            >
+              <LogIn className="size-3.5" />
+              <span>ログインしてコインを貯める</span>
+            </Button>
+          </div>
+        )}
 
-            return (
-              <div
-                key={item.id}
-                className="rounded-2xl border bg-card p-4 sm:p-5 flex flex-col justify-between gap-4 opacity-90 transition-all hover:border-border"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Icon className="size-5" />
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {item.tag && (
-                        <Badge variant="secondary" className="text-[10px] px-2 py-0">
-                          {item.tag}
-                        </Badge>
-                      )}
-                      <span className="font-bold text-sm text-foreground flex items-center gap-1">
-                        <Coins className="size-3.5 text-amber-500" />
-                        <span>{item.cost} LC</span>
-                      </span>
-                    </div>
-                  </div>
+        {/* ヘッダーカード */}
+        <section className="rounded-2xl border bg-gradient-to-br from-amber-500/10 via-card to-card p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-amber-500 text-white font-bold">
+                <Coins className="size-4" />
+              </span>
+              <h1 className="text-base sm:text-lg font-bold text-foreground">
+                {isJa ? 'Labo Coin ショップ & ブースト' : 'Labo Coin Shop'}
+              </h1>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {isJa
+                ? '被験者として実験に参加するともらえる「Labo Coin」を使って、研究の募集を有利に進めるブーストアイテムと交換できます。'
+                : 'Redeem Labo Coins earned by participating in studies for recruitment boost items.'}
+            </p>
+          </div>
 
-                  <div>
-                    <h2 className="font-bold text-sm text-foreground leading-snug">
-                      {item.title}
-                    </h2>
-                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                      {item.description}
-                    </p>
-                  </div>
-                </div>
+          <div className="flex items-center gap-2 bg-card p-3 rounded-xl border shrink-0">
+            <Coins className="size-5 text-amber-500" />
+            <div>
+              <p className="text-[10px] text-muted-foreground">保有コイン</p>
+              <p className="text-base font-bold text-foreground leading-tight">{laboCoins} LC</p>
+            </div>
+          </div>
+        </section>
 
-                <div className="pt-2 border-t flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Clock className="size-3" />
-                    <span>{isJa ? '準備中' : 'Coming soon'}</span>
+        {/* メッセージ通知 */}
+        {message && (
+          <div className="p-3 rounded-xl border bg-card text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+            <span>{message}</span>
+          </div>
+        )}
+
+        {/* アイテム一覧 */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold text-foreground">
+            {isJa ? '利用可能なブーストアイテム' : 'Boost Items'}
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* アイテム 1 */}
+            <div className="rounded-2xl border bg-card p-5 space-y-4 flex flex-col justify-between hover:border-primary/40 transition-colors">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="p-2.5 rounded-xl bg-primary/10 text-primary">
+                    <Rocket className="size-5" />
                   </span>
-                  <Button
-                    size="sm"
-                    disabled
-                    variant="outline"
-                    className="h-8 text-xs font-medium cursor-not-allowed opacity-60"
-                  >
-                    <span>{isJa ? '準備中' : 'Coming Soon'}</span>
-                  </Button>
+                  <Badge variant="outline" className="font-mono text-xs font-bold text-amber-500 border-amber-500/30">
+                    100 LC
+                  </Badge>
+                </div>
+                <div>
+                  <h3 className="font-bold text-foreground text-sm">24h 最上部固定ピン</h3>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    あなたが募集した実験をダッシュボードの最上部に24時間ピン留め固定します。閲覧数が大幅に向上します。
+                  </p>
                 </div>
               </div>
-            )
-          })}
-        </div>
+
+              <Button
+                size="sm"
+                onClick={() => handleExchange(100, '24h 最上部固定ピン')}
+                className="w-full text-xs font-bold mt-2"
+              >
+                {user ? '100 LC で交換する' : 'ログインして交換'}
+              </Button>
+            </div>
+
+            {/* アイテム 2 */}
+            <div className="rounded-2xl border bg-card p-5 space-y-4 flex flex-col justify-between hover:border-orange-500/40 transition-colors">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="p-2.5 rounded-xl bg-orange-500/10 text-orange-500">
+                    <Flame className="size-5" />
+                  </span>
+                  <Badge variant="outline" className="font-mono text-xs font-bold text-amber-500 border-amber-500/30">
+                    50 LC
+                  </Badge>
+                </div>
+                <div>
+                  <h3 className="font-bold text-foreground text-sm">急募アピールバッジ</h3>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    実験カードに「🔥 急募」バッジを付与し、空きコマの学生の注目を集めます。直前の枠埋めに最適です。
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                size="sm"
+                onClick={() => handleExchange(50, '急募アピールバッジ')}
+                className="w-full text-xs font-bold mt-2"
+              >
+                {user ? '50 LC で交換する' : 'ログインして交換'}
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        {/* コイン獲得のヒント */}
+        <section className="rounded-2xl border bg-card p-5 space-y-2 text-xs">
+          <h3 className="font-bold text-foreground flex items-center gap-1.5">
+            <HelpCircle className="size-4 text-primary" />
+            <span>Labo Coin を貯めるには？</span>
+          </h3>
+          <p className="text-muted-foreground leading-relaxed">
+            学内の対面実験に参加すると <strong>+100 LC</strong>、オンラインアンケートへの回答で <strong>+20 LC</strong> が付与されます（※アカウントログイン中のみ付与されます）。
+          </p>
+        </section>
       </main>
+
+      {/* ログインガードモーダル */}
+      <AuthGuardDialog
+        open={authGuardOpen}
+        onOpenChange={setAuthGuardOpen}
+        feature="coin"
+      />
     </div>
   )
 }

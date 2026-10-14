@@ -1,139 +1,100 @@
 'use client'
 
-import { useState } from 'react'
-import {
-  ShieldCheck,
-  Mail,
-  ArrowRight,
-  Sparkles,
-  Lock,
-} from 'lucide-react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
+import { useRouter } from 'next/navigation'
+import { LogIn, Sparkles, AlertCircle, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { useLanguage } from '@/lib/language-context'
 
 interface AuthGuardDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: () => void
+  title?: string
+  description?: string
+  feature?: 'recruit' | 'coin' | 'general'
 }
-
-const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
 export function AuthGuardDialog({
   open,
   onOpenChange,
-  onSuccess,
+  title,
+  description,
+  feature = 'general',
 }: AuthGuardDialogProps) {
+  const router = useRouter()
   const { language } = useLanguage()
   const isJa = language === 'ja'
 
-  const [email, setEmail] = useState('')
-  const [name, setName] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  if (!open) return null
 
-  // 一般メール（Gmail等）で誰でもスムーズにログイン
-  const handleQuickLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
+  const defaultTitle =
+    feature === 'recruit'
+      ? isJa ? '研究者ログインが必要です' : 'Researcher Sign In Required'
+      : feature === 'coin'
+      ? isJa ? 'コインの獲得・利用にはログインが必要です' : 'Sign In Required for Labo Coins'
+      : isJa ? 'ログインが必要です' : 'Sign In Required'
 
-    setTimeout(() => {
-      try {
-        const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-        const current = cached ? JSON.parse(cached) : {}
-        const updated = {
-          ...current,
-          name: name.trim() || current.name || '周誠',
-          email: email.trim() || current.email || 'user@gmail.com',
-          isLoggedIn: true,
-        }
-        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(updated))
-      } catch (err) {
-        console.error(err)
-      }
-
-      setIsSubmitting(false)
-      onOpenChange(false)
-      onSuccess()
-    }, 500)
-  }
+  const defaultDescription =
+    feature === 'recruit'
+      ? isJa
+        ? '実験の新規募集、参加者名簿の確認、募集の管理・取り下げを行うにはアカウント登録またはログインが必要です。'
+        : 'Please sign in to publish studies, manage applicant rosters, and withdraw recruitments.'
+      : feature === 'coin'
+      ? isJa
+        ? 'Labo Coinsの獲得・保持や、ショップでのブーストアイテム交換を行うにはアカウントが必要です。無料登録で即座にコインを貯められます！'
+        : 'Earn and store Labo Coins or redeem boost items by creating a free account!'
+      : isJa
+        ? 'この機能を利用するにはアカウントログインが必要です。'
+        : 'Please sign in to access this feature.'
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader className="space-y-2 text-center items-center">
-          <div className="size-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-1">
-            <Lock className="size-6" />
-          </div>
-          <DialogTitle className="text-xl font-bold">
-            {isJa ? 'アカウントログイン・新規登録' : 'Sign in to Labomate'}
-          </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground leading-relaxed max-w-xs">
-            {isJa
-              ? '実験の募集や応募の管理を行うため、アカウントを入力してください。（Gmail等の普段のメールでOK）'
-              : 'Sign in to create studies and manage applications. (Gmail / personal email OK)'}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+      <div className="w-full max-w-sm rounded-2xl border bg-card p-5 sm:p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 relative">
+        <button
+          type="button"
+          onClick={() => onOpenChange(false)}
+          className="absolute right-4 top-4 text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
 
-        {/* ガイドバナー */}
-        <div className="my-2 p-3 rounded-xl border bg-muted/30 space-y-2 text-xs">
-          <div className="flex items-center gap-2 text-foreground font-semibold">
-            <Sparkles className="size-4 shrink-0 text-amber-500" />
-            <span>{isJa ? '一般メールですぐに利用開始できます' : 'Start instantly with any email'}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            {feature === 'coin' ? <Sparkles className="size-5" /> : <LogIn className="size-5" />}
           </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <ShieldCheck className="size-4 shrink-0 text-emerald-600" />
-            <span>{isJa ? '大学認証バッジは後からプロフィールで取得可能' : 'Get university verified badge later in profile'}</span>
+          <div>
+            <h3 className="font-bold text-sm sm:text-base text-foreground">
+              {title || defaultTitle}
+            </h3>
+            <p className="text-[11px] text-muted-foreground">Labomate Academic Platform</p>
           </div>
         </div>
 
-        {/* ログインフォーム */}
-        <form onSubmit={handleQuickLogin} className="space-y-3.5 pt-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="auth-name" className="text-xs font-semibold">
-              {isJa ? '氏名またはニックネーム' : 'Name'}
-            </Label>
-            <Input
-              id="auth-name"
-              placeholder={isJa ? '例: 周誠' : 'e.g. Shusei'}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {description || defaultDescription}
+        </p>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="auth-email" className="text-xs font-semibold">
-              {isJa ? 'メールアドレス（Gmail / 大学メールなど）' : 'Email Address'}
-            </Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                id="auth-email"
-                type="email"
-                placeholder="example@gmail.com"
-                className="pl-9"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          <Button type="submit" disabled={isSubmitting} className="w-full gap-2 mt-4 font-bold shadow-sm">
-            {isJa ? 'ログインして続ける' : 'Continue'}
-            <ArrowRight className="size-4" />
+        <div className="flex flex-col gap-2 pt-2">
+          <Button
+            onClick={() => {
+              onOpenChange(false)
+              router.push('/login')
+            }}
+            className="w-full h-9 text-xs font-bold gap-1.5 bg-primary text-primary-foreground shadow-sm"
+          >
+            <LogIn className="size-3.5" />
+            <span>{isJa ? 'ログイン / 新規登録（無料）' : 'Sign In / Register (Free)'}</span>
           </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="w-full h-8 text-xs text-muted-foreground"
+          >
+            {isJa ? 'あとで（閉じる）' : 'Maybe Later'}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }

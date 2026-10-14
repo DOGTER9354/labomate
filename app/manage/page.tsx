@@ -20,12 +20,16 @@ import { useLanguage } from '@/lib/language-context'
 import { supabase } from '@/lib/supabase'
 import { CreateExperimentDialog } from '@/components/labomate/create-experiment-dialog'
 import { EXPERIMENTS } from '@/lib/experiments'
+import { useAuth } from '@/lib/auth-context'
+import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
 
 export default function ManagePage() {
   const { language } = useLanguage()
   const isJa = language === 'ja'
+  const { user } = useAuth()
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [authGuardOpen, setAuthGuardOpen] = useState(false)
   const [myExperiments, setMyExperiments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -33,6 +37,15 @@ export default function ManagePage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deletingTitle, setDeletingTitle] = useState<string>('')
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // 募集作成ボタン押下時のガード処理
+  const handleOpenCreateModal = () => {
+    if (!user) {
+      setAuthGuardOpen(true)
+      return
+    }
+    setCreateDialogOpen(true)
+  }
 
   // 募集実験一覧を取得（Supabase + サンプルデータ）
   const fetchExperiments = useCallback(async () => {
@@ -100,9 +113,10 @@ export default function ManagePage() {
             <span>{isJa ? '探す（トップ）に戻る' : 'Back to Explore'}</span>
           </Link>
 
+          {/* ログインガード付きボタン */}
           <Button
             size="sm"
-            onClick={() => setCreateDialogOpen(true)}
+            onClick={handleOpenCreateModal}
             className="h-8 text-xs font-bold gap-1.5 bg-primary text-primary-foreground shadow-sm"
           >
             <Plus className="size-3.5 stroke-[2.5]" />
@@ -130,8 +144,9 @@ export default function ManagePage() {
             </p>
           </div>
 
+          {/* ログインガード付きボタン */}
           <Button
-            onClick={() => setCreateDialogOpen(true)}
+            onClick={handleOpenCreateModal}
             className="h-9 px-4 text-xs font-bold gap-1.5 shrink-0 bg-primary text-primary-foreground shadow-sm self-start sm:self-auto"
           >
             <Plus className="size-4 stroke-[2.5]" />
@@ -167,7 +182,7 @@ export default function ManagePage() {
               </p>
               <Button
                 size="sm"
-                onClick={() => setCreateDialogOpen(true)}
+                onClick={handleOpenCreateModal}
                 className="mt-2 text-xs font-bold"
               >
                 {isJa ? '実験を作成する' : 'Create Study'}
@@ -236,7 +251,7 @@ export default function ManagePage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setCreateDialogOpen(true)}
+                      onClick={handleOpenCreateModal}
                       className="h-8 text-xs font-semibold"
                     >
                       <span>{isJa ? '編集' : 'Edit'}</span>
@@ -310,6 +325,13 @@ export default function ManagePage() {
         onSuccess={() => {
           fetchExperiments()
         }}
+      />
+
+      {/* ログインガードダイアログ */}
+      <AuthGuardDialog
+        open={authGuardOpen}
+        onOpenChange={setAuthGuardOpen}
+        feature="recruit"
       />
     </div>
   )

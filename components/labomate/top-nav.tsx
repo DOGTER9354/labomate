@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
 import { useTheme, type ThemeMode } from '@/lib/theme-context'
 import type { FilterId } from '@/lib/experiments'
+import { useAuth } from '@/lib/auth-context'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
@@ -29,6 +30,7 @@ export function TopNav({
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
   const { theme, setTheme, resolvedTheme } = useTheme()
+  const { user } = useAuth()
 
   const [laboCoins, setLaboCoins] = useState<number>(350)
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
@@ -85,7 +87,7 @@ export function TopNav({
               </Badge>
             </div>
             <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-              慶應学内実験・調査募集
+              学内実験・調査募集プラットフォーム
             </span>
           </div>
         </Link>
@@ -106,7 +108,7 @@ export function TopNav({
           </div>
         )}
 
-        {/* 右側：テーマ切替、言語切替、コイン、プロフィールアイコン */}
+        {/* 右側：テーマ切替、言語切替、コイン、プロフィール/ログインアイコン */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* テーマ切替ポップアップ */}
           <div className="relative" ref={menuRef}>
@@ -192,13 +194,25 @@ export function TopNav({
             <span>{laboCoins} LC</span>
           </Link>
 
-          {/* プロフィールアバター */}
-          <Link
-            href="/profile"
-            className="flex size-8 items-center justify-center rounded-full bg-muted border text-foreground font-bold text-xs hover:border-primary/50 transition-colors"
-          >
-            {userName ? userName.slice(0, 1) : <User className="size-4" />}
-          </Link>
+          {/* ログインボタン または プロフィールアバター */}
+          {user ? (
+            <Link
+              href="/profile"
+              className="flex size-8 items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-primary font-bold text-xs hover:border-primary transition-colors"
+              title={user.email ?? 'プロフィール'}
+            >
+              {user.user_metadata?.full_name
+                ? user.user_metadata.full_name.slice(0, 1)
+                : user.email?.slice(0, 1).toUpperCase() || <User className="size-4" />}
+            </Link>
+          ) : (
+            <Link href="/login">
+              <Button size="sm" variant="outline" className="h-8 px-2.5 text-xs font-bold gap-1">
+                <User className="size-3.5" />
+                <span>{isJa ? 'ログイン' : 'Sign In'}</span>
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
     </header>

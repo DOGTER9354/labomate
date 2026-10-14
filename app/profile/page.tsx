@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
   Coins,
@@ -30,12 +31,16 @@ import {
   ChevronRight,
   MessageSquare,
   Building,
+  User,
+  LogIn,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useLanguage } from '@/lib/language-context'
 import { useTheme } from '@/lib/theme-context'
+import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
@@ -63,9 +68,11 @@ interface ApplicationRecord {
 }
 
 export default function ProfilePage() {
+  const router = useRouter()
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
   const { theme, setTheme } = useTheme()
+  const { user, loading: authLoading, signOut } = useAuth()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('basic')
   const [isEditing, setIsEditing] = useState(false)
@@ -91,31 +98,50 @@ export default function ProfilePage() {
   // 保存メッセージ
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
-  // ローカルストレージから復帰
+  // Supabase Auth のログインユーザー情報およびローカルストレージを同期
   useEffect(() => {
+    let baseProfile: ProfileData = {
+      name: '周誠',
+      email: 'student@keio.jp',
+      faculty: '環境情報学部',
+      grade: 'B3',
+      dominantHand: '右利き',
+      vision: '裸眼',
+      laboCoins: 450,
+    }
+
     try {
       const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
       if (cached) {
-        const parsed = JSON.parse(cached)
-        setProfile((prev) => {
-          const next = { ...prev, ...parsed }
-          setFormData(next)
-          return next
-        })
+        baseProfile = { ...baseProfile, ...JSON.parse(cached) }
       }
     } catch (e) {
       console.error(e)
     }
-  }, [])
+
+    // ログインユーザーが存在する場合は優先反映
+    if (user) {
+      const meta = user.user_metadata || {}
+      baseProfile.email = user.email || baseProfile.email
+      if (meta.full_name) baseProfile.name = meta.full_name
+      if (meta.faculty) baseProfile.faculty = meta.faculty
+    }
+
+    setProfile(baseProfile)
+    setFormData(baseProfile)
+  }, [user])
 
   // 履歴取得
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true)
+    const emailToQuery = user?.email || profile.email
+    const nameToQuery = profile.name
+
     try {
       const { data, error } = await supabase
         .from('applications')
         .select('*')
-        .or(`applicant_email.eq.${profile.email},applicant_name.eq.${profile.name}`)
+        .or(`applicant_email.eq.${emailToQuery},applicant_name.eq.${nameToQuery}`)
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
@@ -126,7 +152,7 @@ export default function ProfilePage() {
     } finally {
       setLoadingHistory(false)
     }
-  }, [profile.email, profile.name])
+  }, [user?.email, profile.email, profile.name])
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -135,7 +161,7 @@ export default function ProfilePage() {
   }, [activeTab, fetchHistory])
 
   // プロフィール編集の保存
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     setProfile(formData)
     try {
       const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
@@ -144,6 +170,16 @@ export default function ProfilePage() {
         PROFILE_STORAGE_KEY,
         JSON.stringify({ ...current, ...formData })
       )
+
+      // ログイン中の場合は Supabase Auth のメタデータも更新
+      if (user) {
+        await supabase.auth.updateUser({
+          data: {
+            full_name: formData.name,
+            faculty: formData.faculty,
+          },
+        })
+      }
     } catch (e) {
       console.error(e)
     }
@@ -155,6 +191,63 @@ export default function ProfilePage() {
   const handleCancelEdit = () => {
     setFormData(profile)
     setIsEditing(false)
+  }
+
+  // ログアウト処理
+  const handleSignOut = async () => {
+    if (window.confirm(isJa ? 'ログアウトしますか？' : 'Are you sure you want to log out?')) {
+      await signOut()
+      router.push('/login')
+    }
+  }
+
+  // 認証ローディング中
+  if (authLoading) {
+    return (
+      <div className="min-h-dvh bg-background flex items-center justify-center">
+        <Loader2 className="size-6 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  // 未ログイン時の案内表示
+  if (!user) {
+    return (
+      <div className="min-h-dvh bg-background text-foreground flex flex-col justify-center items-center px-4 py-16">
+        <div className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-sm text-center space-y-4">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <User className="size-6" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base sm:text-lg font-bold text-foreground">
+              {isJa ? 'ログインが必要です' : 'Sign in Required'}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {isJa
+                ? 'マイページの確認や実験の応募・管理にはログインまたは新規登録が必要です。'
+                : 'Please sign in to view your profile, manage bookings, and earn Labo Coins.'}
+            </p>
+          </div>
+
+          <div className="pt-2 flex flex-col gap-2">
+            <Button
+              onClick={() => router.push('/login')}
+              className="w-full h-10 text-xs font-bold gap-1.5 bg-primary text-primary-foreground"
+            >
+              <LogIn className="size-4" />
+              <span>{isJa ? 'ログイン / 新規登録へ' : 'Sign In / Register'}</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => router.push('/')}
+              className="w-full h-10 text-xs font-semibold"
+            >
+              {isJa ? 'トップ（探す）に戻る' : 'Back to Explore'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -181,8 +274,8 @@ export default function ProfilePage() {
         {/* プロフィール基本ヘッダーカード */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6">
           <div className="flex items-center gap-4">
-            <div className="flex size-14 items-center justify-center rounded-2xl bg-muted border font-bold text-lg text-foreground">
-              {profile.name}
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 font-bold text-lg text-primary">
+              {profile.name ? profile.name.slice(0, 1) : <User className="size-6" />}
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -310,7 +403,7 @@ export default function ProfilePage() {
           </button>
         </div>
 
-        {/* タブ 1: 基本情報 & 大学認証 */}
+        {/* タブ 1: 基本情報 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
             <div className="rounded-2xl border bg-card p-5 space-y-3">
@@ -371,10 +464,10 @@ export default function ProfilePage() {
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">アカウントメール *</label>
                   <Input
-                    readOnly={!isEditing}
+                    readOnly={true}
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
+                    className="bg-muted/40 cursor-default focus-visible:ring-0 text-muted-foreground"
+                    title="メールアドレスの変更は設定タブから申請してください"
                   />
                 </div>
 
@@ -557,12 +650,12 @@ export default function ProfilePage() {
             <h3 className="text-sm font-bold text-foreground border-b pb-3">アカウント & アプリ設定</h3>
 
             <div className="space-y-4 text-xs">
-              {/* 1. メールアドレス変更 */}
+              {/* 1. メールアドレス確認 */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
                     <Mail className="size-3.5 text-muted-foreground" />
-                    <span>登録メールアドレスの変更</span>
+                    <span>登録メールアドレス</span>
                   </p>
                   <p className="text-[11px] text-muted-foreground">現在: {profile.email}</p>
                 </div>
@@ -660,29 +753,24 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* 5. ログアウト / リセット */}
+              {/* 5. ログアウト */}
               <div className="flex items-center justify-between pt-1">
                 <div className="space-y-0.5">
                   <p className="font-bold text-destructive flex items-center gap-1.5">
                     <LogOut className="size-3.5" />
-                    <span>ログアウト・ローカルデータ初期化</span>
+                    <span>ログアウト</span>
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    端末に保存されたプロフィールをクリアします
+                    アカウントからサインアウトします
                   </p>
                 </div>
                 <Button
                   size="sm"
                   variant="destructive"
-                  onClick={() => {
-                    if (window.confirm('ローカルデータをリセットしますか？')) {
-                      localStorage.removeItem(PROFILE_STORAGE_KEY)
-                      window.location.reload()
-                    }
-                  }}
+                  onClick={handleSignOut}
                   className="h-8 text-xs font-semibold"
                 >
-                  初期化
+                  ログアウト
                 </Button>
               </div>
             </div>
@@ -734,7 +822,6 @@ export default function ProfilePage() {
               </div>
 
               <div className="rounded-2xl border bg-card divide-y text-xs">
-                {/* 公式X */}
                 <a
                   href="https://x.com/Labomate1005"
                   target="_blank"
@@ -758,7 +845,6 @@ export default function ProfilePage() {
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </a>
 
-                {/* 公式Instagram */}
                 <a
                   href="https://instagram.com/labomate1005?obrf=MXNneWc1cXNsazRl"
                   target="_blank"
