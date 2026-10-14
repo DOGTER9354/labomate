@@ -114,51 +114,7 @@ export default function ProfilePage() {
   // 保存メッセージ
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
-  // 🎓 慶應義塾大学 SSO 認証から戻ってきた時の検知＆DB更新処理
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-
-    if (params.get('verify_keio') === 'true' && user) {
-      const email = user.email || ''
-      const emailCheck = verifyAcademicEmail(email)
-
-      if (emailCheck.isKeio || email.endsWith('@keio.jp') || email.endsWith('.keio.jp')) {
-        supabase
-          .from('user_profiles')
-          .update({
-            is_academic_verified: true,
-            academic_email: email,
-            academic_institution: '慶應義塾大学',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id)
-          .then(({ error }) => {
-            if (!error) {
-              setIsAcademicVerified(true)
-              setAcademicEmail(email)
-              setInstitutionName('慶應義塾大学')
-              setSavedNotice(
-                isJa
-                  ? '慶應義塾大学の公式所属認証が完了しました！認証バッジが付与されました。'
-                  : 'Keio University verification completed!'
-              )
-              setTimeout(() => setSavedNotice(null), 4000)
-            }
-            window.history.replaceState({}, '', '/profile')
-          })
-      } else {
-        alert(
-          isJa
-            ? '認証されたアカウントが慶應義塾（@keio.jp）ではありませんでした。@keio.jp のアカウントでお試しください。'
-            : 'The verified account is not a @keio.jp account.'
-        )
-        window.history.replaceState({}, '', '/profile')
-      }
-    }
-  }, [user, isJa])
-
-  // Supabase Auth および user_profiles テーブルと同期
+  // Supabase Auth および user_profiles テーブル、localStorage と同期
   useEffect(() => {
     const loadProfile = async () => {
       if (user) {
@@ -174,8 +130,35 @@ export default function ProfilePage() {
           itemBadgeCount: 0,
         }
 
-        const emailCheck = verifyAcademicEmail(user.email)
+        // 🎓 大学認証ステータスの判定（3段チェック）
+        let verified = false
+        let verifiedAcademicEmail: string | null = null
+        let verifiedInstitution = '未認証'
 
+        // 1. localStorage を即座に確認（画面のチラつき防止）
+        try {
+          const cachedVerified = localStorage.getItem(`academic_verified_${user.id}`)
+          if (cachedVerified) {
+            const parsed = JSON.parse(cachedVerified)
+            if (parsed.isVerified) {
+              verified = true
+              verifiedAcademicEmail = parsed.academicEmail
+              verifiedInstitution = parsed.institutionName
+            }
+          }
+        } catch (e) {
+          console.error(e)
+        }
+
+        // 2. ログインメール自体のドメイン確認（最初から @keio.jp でログインした場合）
+        const emailCheck = verifyAcademicEmail(user.email)
+        if (emailCheck.isVerified) {
+          verified = true
+          verifiedAcademicEmail = user.email || null
+          verifiedInstitution = emailCheck.institutionName
+        }
+
+        // 3. Supabase DB (user_profiles) を確認
         try {
           const { data, error } = await supabase
             .from('user_profiles')
@@ -190,25 +173,39 @@ export default function ProfilePage() {
             if (typeof data.item_pin_count === 'number') baseProfile.itemPinCount = data.item_pin_count
             if (typeof data.item_badge_count === 'number') baseProfile.itemBadgeCount = data.item_badge_count
 
-            // DB上の明示的なフラグ設定を優先
-            const verified = data.is_academic_verified !== null && data.is_academic_verified !== undefined
-              ? data.is_academic_verified
-              : emailCheck.isVerified
-
-            setIsAcademicVerified(verified)
-            setAcademicEmail(data.academic_email || (verified ? user.email || null : null))
-            setInstitutionName(data.academic_institution || (verified ? emailCheck.institutionName : '未認証'))
-          } else {
-            setIsAcademicVerified(emailCheck.isVerified)
-            setAcademicEmail(emailCheck.isVerified ? user.email || null : null)
-            setInstitutionName(emailCheck.institutionName)
+            // DB上の設定があれば反映
+            if (data.is_academic_verified) {
+              verified = true
+              verifiedAcademicEmail = data.academic_email
+              verifiedInstitution = data.academic_institution || '慶應義塾大学'
+              // localStorage側も同期
+              try {
+                localStorage.setItem(
+                  `academic_verified_${user.id}`,
+                  JSON.stringify({
+                    isVerified: true,
+                    academicEmail: data.academic_email,
+                    institutionName: data.academic_institution || '慶應義塾大学',
+                  })
+                )
+              } catch (e) {}
+            } else if (data.is_academic_verified === false && !emailCheck.isVerified) {
+              // DB側で明示的に false になっていれば未認証に合わせる
+              verified = false
+              verifiedAcademicEmail = null
+              verifiedInstitution = '未認証'
+              localStorage.removeItem(`academic_verified_${user.id}`)
+            }
           }
         } catch (dbErr) {
           console.error('Failed to load user_profiles from DB:', dbErr)
-          setIsAcademicVerified(emailCheck.isVerified)
-          setInstitutionName(emailCheck.institutionName)
         }
 
+        setIsAcademicVerified(verified)
+        setAcademicEmail(verifiedAcademicEmail)
+        setInstitutionName(verifiedInstitution)
+
+        // 基本属性ローカルキャッシュの読み込み
         try {
           const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
           if (cached) {
@@ -337,6 +334,18 @@ export default function ProfilePage() {
     setIsAcademicVerified(true)
     setAcademicEmail(verifiedEmail)
     setInstitutionName(instName)
+    if (user) {
+      try {
+        localStorage.setItem(
+          `academic_verified_${user.id}`,
+          JSON.stringify({
+            isVerified: true,
+            academicEmail: verifiedEmail,
+            institutionName: instName,
+          })
+        )
+      } catch (e) {}
+    }
     setSavedNotice(isJa ? `${instName} の所属認証が完了しました！` : 'Academic verification completed!')
     setTimeout(() => setSavedNotice(null), 3500)
   }
@@ -353,6 +362,10 @@ export default function ProfilePage() {
 
     setIsUnlinking(true)
     try {
+      // 1. ローカルキャッシュを即座に破棄
+      localStorage.removeItem(`academic_verified_${user.id}`)
+
+      // 2. DBを更新
       const { error } = await supabase
         .from('user_profiles')
         .update({
