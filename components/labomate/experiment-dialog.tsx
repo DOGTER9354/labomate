@@ -1,18 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import {
-  Calendar,
-  Clock,
-  Building2,
-  Globe2,
-  ExternalLink,
-  CheckCircle2,
-  AlertCircle,
-  LogIn,
-  Coins,
-} from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -24,335 +12,279 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { useLanguage } from '@/lib/language-context'
-import { useAuth } from '@/lib/auth-context'
+import {
+  MapPin,
+  Clock,
+  Coins,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  Calendar,
+  Building2,
+  Globe2,
+  UserCheck,
+  Lock,
+} from 'lucide-react'
+import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
-import { formatYen, type Experiment } from '@/lib/experiments'
+import { useAuth } from '@/lib/auth-context'
 
 interface ExperimentDialogProps {
   experiment: Experiment | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onApplied?: (expId: string) => void
+  bookedSlotId?: string
   onConfirm?: (experimentId: string, slotId: string) => void
-  bookedSlotId?: string | null
 }
-
-const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
 export function ExperimentDialog({
   experiment,
   open,
   onOpenChange,
-  onApplied,
-  onConfirm,
   bookedSlotId,
+  onConfirm,
 }: ExperimentDialogProps) {
-  const { language } = useLanguage()
-  const isJa = language === 'ja'
   const { user } = useAuth()
 
-  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(bookedSlotId || null)
-  const [completionCodeInput, setCompletionCodeInput] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [appliedSuccess, setAppliedSuccess] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  // スロットごとの予約済み人数マップ
-  const [bookedSlotCounts, setBookedSlotCounts] = useState<Record<string, number>>({})
+  // 本名ステート
+  const [realNameNative, setRealNameNative] = useState('')
+  const [realNameEnglish, setRealNameEnglish] = useState('')
+  const [hasExistingRealName, setHasExistingRealName] = useState(false)
+  const [loadingProfile, setLoadingProfile] = useState(false)
 
+  // プロフィールから本名情報を取得
   useEffect(() => {
-    if (!open || !experiment) {
-      setSelectedSlotId(bookedSlotId || null)
-      setCompletionCodeInput('')
-      setErrorMsg(null)
-      setSuccessMsg(null)
-      return
-    }
+    if (!open || !user) return
 
-    if (bookedSlotId) {
-      setSelectedSlotId(bookedSlotId)
-    }
-
-    const fetchSlotBookings = async () => {
+    const fetchUserProfile = async () => {
+      setLoadingProfile(true)
       try {
         const { data, error } = await supabase
-          .from('applications')
-          .select('slot_id, slot_time')
-          .eq('experiment_id', experiment.id)
+          .from('user_profiles')
+          .select('real_name_native, real_name_english, full_name')
+          .eq('id', user.id)
+          .single()
 
         if (!error && data) {
-          const counts: Record<string, number> = {}
-          data.forEach((app) => {
-            const key = app.slot_id || app.slot_time
-            if (key) {
-              counts[key] = (counts[key] || 0) + 1
-            }
-          })
-          setBookedSlotCounts(counts)
+          const native = data.real_name_native || ''
+          const english = data.real_name_english || ''
+          setRealNameNative(native)
+          setRealNameEnglish(english)
+          if (native.trim() && english.trim()) {
+            setHasExistingRealName(true)
+          } else {
+            setHasExistingRealName(false)
+          }
         }
       } catch (err) {
-        console.error('Failed to fetch slot bookings:', err)
+        console.error('Failed to fetch user profile:', err)
+      } finally {
+        setLoadingProfile(false)
       }
     }
 
-    fetchSlotBookings()
-  }, [open, experiment, bookedSlotId])
+    fetchUserProfile()
+  }, [open, user])
+
+  // 開いたときの初期化
+  useEffect(() => {
+    if (open) {
+      setSelectedSlotId(bookedSlotId || null)
+      setErrorMessage(null)
+      setAppliedSuccess(false)
+    }
+  }, [open, bookedSlotId])
 
   if (!experiment) return null
 
-  // 応募者の情報を取得（ログインユーザー優先、次にローカルストレージ、最後にデフォルト）
-  const getApplicantData = () => {
-    if (user) {
-      return {
-        name: user.user_metadata?.full_name || '学生ユーザー',
-        email: user.email || 'student@university.ac.jp',
-        faculty: user.user_metadata?.faculty || '未設定',
-      }
-    }
-
-    try {
-      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        return {
-          name: parsed.name || 'ゲスト参加者',
-          email: parsed.email || 'guest@example.com',
-          faculty: parsed.faculty || '未設定',
-        }
-      }
-    } catch (e) {
-      console.error(e)
-    }
-
-    return {
-      name: 'ゲスト参加者',
-      email: 'guest@example.com',
-      faculty: '未設定',
-    }
-  }
-
+  // 応募実行
   const handleApply = async () => {
-    setErrorMsg(null)
-    setSuccessMsg(null)
+    setErrorMessage(null)
 
-    const isOnline = experiment.mode === 'online'
-
-    if (!isOnline && !selectedSlotId) {
-      setErrorMsg(isJa ? '参加希望の日時枠を選択してください。' : 'Please select a time slot.')
+    if (!user) {
+      setErrorMessage('応募するにはログインが必要です。')
       return
     }
 
-    if (isOnline) {
-      if (!completionCodeInput.trim()) {
-        setErrorMsg(isJa ? '回答完了コードを入力してください。' : 'Please enter completion code.')
-        return
-      }
-      if (
-        experiment.completionCode &&
-        completionCodeInput.trim() !== experiment.completionCode.trim()
-      ) {
-        setErrorMsg(
-          isJa
-            ? '入力された完了コードが一致しません。正しいコードを入力してください。'
-            : 'Invalid completion code. Please check and try again.'
-        )
-        return
-      }
+    // 本名の入力チェック（必須）
+    const cleanNative = realNameNative.trim()
+    const cleanEnglish = realNameEnglish.trim()
+    if (!cleanNative || !cleanEnglish) {
+      setErrorMessage('研究倫理および出席・謝礼受領確認のため、本名（母国語・英語）の入力が必須です。')
+      return
     }
 
-    const selectedSlot = experiment.slots?.find((s) => s.id === selectedSlotId)
-    if (!isOnline && selectedSlot) {
-      const bookedCount =
-        bookedSlotCounts[selectedSlot.id] ||
-        bookedSlotCounts[`${selectedSlot.date} ${selectedSlot.time}`] ||
-        0
-      const totalCapacity = selectedSlot.spotsTotal || 1
-      if (bookedCount >= totalCapacity) {
-        setErrorMsg(isJa ? '申し訳ありません。この時間枠は満席になりました。' : 'This time slot is now full.')
-        return
-      }
+    // スロットが存在する場合は選択必須
+    if (experiment.slots && experiment.slots.length > 0 && !selectedSlotId) {
+      setErrorMessage('参加希望の日時枠を選択してください。')
+      return
     }
 
-    setIsSubmitting(true)
+    setLoading(true)
 
     try {
-      const applicant = getApplicantData()
+      // 1. プロフィール側に本名が未保存だった場合は自動更新
+      if (!hasExistingRealName) {
+        await supabase
+          .from('user_profiles')
+          .update({
+            real_name_native: cleanNative,
+            real_name_english: cleanEnglish,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id)
+      }
 
-      const applicationPayload: Record<string, any> = {
+      // 2. applications テーブルに新規応募を記録
+      const selectedSlot = experiment.slots?.find((s) => s.id === selectedSlotId)
+      const slotTimeText = selectedSlot?.time || '日時指定なし'
+
+      const { error: applyError } = await supabase.from('applications').insert({
         experiment_id: experiment.id,
         experiment_title: experiment.title,
-        applicant_name: applicant.name,
-        applicant_email: applicant.email,
-        faculty: applicant.faculty,
-        format: isOnline ? 'オンライン' : '対面',
-        status: isOnline ? '提出済み' : '予約完了',
-        slot_id: selectedSlot?.id || (isOnline ? 'online' : null),
-        slot_time: selectedSlot ? `${selectedSlot.date} ${selectedSlot.time}` : (isOnline ? 'オンライン' : null),
-        completion_code: isOnline ? completionCodeInput.trim() : null,
+        applicant_id: user.id,
+        applicant_email: user.email,
+        applicant_name: cleanNative,
+        applicant_name_native: cleanNative,
+        applicant_name_english: cleanEnglish,
+        slot_time: slotTimeText,
+        format: experiment.mode === 'online' || experiment.location?.includes('オンライン') ? 'オンライン' : '対面',
+        status: '確定',
         applied_at: new Date().toISOString(),
+      })
+
+      if (applyError) throw applyError
+
+      // 3. 親コンポーネント（dashboard.tsx）の予約確定ハンドラーを呼ぶ
+      if (onConfirm && selectedSlotId) {
+        onConfirm(experiment.id, selectedSlotId)
       }
 
-      const { error } = await supabase.from('applications').insert([applicationPayload])
-
-      if (error) {
-        console.error('Failed to apply:', error)
-        setErrorMsg(error.message)
-        setIsSubmitting(false)
-        return
-      }
-
-      // Supabase の experiments.spots_left を 1 減算
-      try {
-        const currentSpotsLeft = Math.max(0, (experiment.spotsLeft ?? 1) - 1)
-        await supabase
-          .from('experiments')
-          .update({ spots_left: currentSpotsLeft })
-          .eq('id', experiment.id)
-      } catch (updateErr) {
-        console.error('Failed to decrement spots_left:', updateErr)
-      }
-
-      setSuccessMsg(
-        isJa
-          ? user
-            ? '応募が完了しました！マイページに履歴が保存されました。'
-            : '応募が完了しました！'
-          : 'Application successful!'
-      )
-      if (onApplied) onApplied(experiment.id)
-      if (onConfirm) onConfirm(experiment.id, selectedSlot?.id || 'online')
-
+      setAppliedSuccess(true)
       setTimeout(() => {
+        setAppliedSuccess(false)
         onOpenChange(false)
-      }, 1500)
+      }, 1600)
     } catch (err: any) {
-      console.error(err)
-      setErrorMsg(err.message || 'Error occurred')
+      console.error('Apply error:', err)
+      setErrorMessage(err.message || '応募処理に失敗しました。')
     } finally {
-      setIsSubmitting(false)
+      setLoading(false)
     }
   }
 
-  const expAny = experiment as any
-  const rewardDisplayText =
-    typeof expAny.reward === 'string' && expAny.reward.trim() !== ''
-      ? expAny.reward
-      : experiment.rewardAmount > 0
-      ? formatYen(experiment.rewardAmount)
-      : '謝礼なし（ボランティア）'
+  const handleClose = () => {
+    onOpenChange(false)
+    setErrorMessage(null)
+    setAppliedSuccess(false)
+  }
 
-  const departmentDisplayText =
-    experiment.department || expAny.field || '認知科学研究室'
+  const isOnline = experiment.mode === 'online' || experiment.location?.includes('オンライン')
+
+  // 謝礼表示の整形
+  const rewardDisplayText =
+    typeof (experiment as any).rewardAmount === 'number'
+      ? `¥${(experiment as any).rewardAmount.toLocaleString()}`
+      : typeof (experiment as any).reward === 'number'
+      ? `¥${(experiment as any).reward.toLocaleString()}`
+      : (experiment as any).reward || (experiment as any).rewardAmount || '謝礼あり'
+
+  const durationText =
+    typeof (experiment as any).durationMinutes === 'number'
+      ? `${(experiment as any).durationMinutes}分`
+      : (experiment as any).duration || '約30分'
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader className="space-y-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge
-              variant={experiment.mode === 'in-person' ? 'default' : 'secondary'}
-              className="text-[10px] px-2 py-0.5 font-semibold"
-            >
-              {experiment.mode === 'in-person' ? (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-[10px]">
+              {isOnline ? (
                 <span className="flex items-center gap-1">
-                  <Building2 className="size-3" /> 学内対面
+                  <Globe2 className="size-3" /> オンライン
                 </span>
               ) : (
                 <span className="flex items-center gap-1">
-                  <Globe2 className="size-3" /> オンライン調査
+                  <Building2 className="size-3" /> 対面
                 </span>
               )}
             </Badge>
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
-              {departmentDisplayText}
-            </Badge>
-            {experiment.labName && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
-                {experiment.labName}
-              </Badge>
-            )}
+            <span className="text-xs text-muted-foreground font-medium">
+              {(experiment as any).labName || (experiment as any).organizer || '研究室'}
+            </span>
           </div>
 
-          <DialogTitle className="text-lg font-bold leading-snug text-foreground">
+          <DialogTitle className="text-base sm:text-lg font-bold text-foreground leading-snug">
             {experiment.title}
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
-            {experiment.description || '実験の詳細は以下の項目をご確認ください。'}
+          <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
+            {experiment.description || '参加条件・注意事項を確認の上、希望スロットを選択して応募してください。'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 pt-2">
-          {/* 未ログイン時のコイン付与対象外アラート */}
-          {!user && (
-            <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs space-y-1.5 animate-in fade-in">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                  <Coins className="size-4 shrink-0" />
-                  <span>{isJa ? 'コイン獲得に関するご案内' : 'Labo Coins Notice'}</span>
-                </span>
-                <Link
-                  href="/login"
-                  onClick={() => onOpenChange(false)}
-                  className="text-[11px] font-bold text-primary hover:underline flex items-center gap-0.5"
-                >
-                  <span>{isJa ? 'ログインする' : 'Sign In'}</span>
-                  <LogIn className="size-3" />
-                </Link>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {isJa
-                  ? '現在未ログインです。このまま応募しても Labo Coins は獲得・保持されません。コインを貯めてブーストアイテムと交換するにはログイン後の応募をおすすめします。'
-                  : 'You are currently not signed in. Labo Coins will not be credited without an account.'}
-              </p>
+        {appliedSuccess ? (
+          <div className="py-10 text-center space-y-3">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
+              <CheckCircle2 className="size-8" />
             </div>
-          )}
-
-          {/* 基本スペック */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 p-3 rounded-xl bg-muted/30 border text-xs">
-            <div>
-              <span className="text-[10px] text-muted-foreground block">謝礼</span>
-              <span className="font-bold text-foreground text-sm">
-                {rewardDisplayText}
-              </span>
-            </div>
-            <div>
-              <span className="text-[10px] text-muted-foreground block">所要時間</span>
-              <span className="font-semibold text-foreground">
-                約{experiment.durationMins || 30}分
-              </span>
-            </div>
-            <div className="col-span-2 sm:col-span-1">
-              <span className="text-[10px] text-muted-foreground block">場所 / 形式</span>
-              <span className="font-medium text-foreground truncate block">
-                {experiment.location || 'キャンパス内'}
-              </span>
-            </div>
+            <p className="text-base font-bold text-foreground">応募が完了しました！</p>
+            <p className="text-xs text-muted-foreground">
+              マイページの「実験履歴」タブから予約内容を確認できます。
+            </p>
           </div>
-
-          {/* 対面実験スロット一覧 */}
-          {experiment.mode === 'in-person' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                  <Calendar className="size-3.5 text-primary" />
-                  <span>{isJa ? '参加希望の日時枠を選択' : 'Select Time Slot'}</span>
-                </Label>
-                <span className="text-[11px] text-muted-foreground">
-                  {isJa ? '※ 各枠先着順' : 'First-come, first-served'}
+        ) : (
+          <div className="space-y-5 pt-2">
+            {/* 謝礼・場所・時間などの基本情報 */}
+            <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-muted/30 border text-xs">
+              <div className="space-y-1">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Coins className="size-3.5 text-amber-500" />
+                  <span>謝礼 / コイン</span>
                 </span>
+                <p className="font-bold text-foreground">
+                  {rewardDisplayText}{' '}
+                  <span className="text-amber-500">
+                    +{(experiment as any).rewardCoins || (experiment as any).coins || 100} LC
+                  </span>
+                </p>
               </div>
 
-              {experiment.slots && experiment.slots.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
-                  {experiment.slots.map((slot) => {
-                    const bookedCount =
-                      bookedSlotCounts[slot.id] ||
-                      bookedSlotCounts[`${slot.date} ${slot.time}`] ||
-                      0
-                    const totalSpots = slot.spotsTotal || 1
-                    const spotsRemaining = Math.max(0, totalSpots - bookedCount)
-                    const isFull = spotsRemaining === 0
+              <div className="space-y-1">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Clock className="size-3.5" />
+                  <span>所要時間</span>
+                </span>
+                <p className="font-bold text-foreground">{durationText}</p>
+              </div>
+
+              <div className="col-span-2 space-y-1 pt-1 border-t">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <MapPin className="size-3.5" />
+                  <span>集合・実施場所</span>
+                </span>
+                <p className="font-bold text-foreground">{experiment.location || '詳細は応募完了後に連絡'}</p>
+              </div>
+            </div>
+
+            {/* スロット選択 */}
+            {experiment.slots && experiment.slots.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <Calendar className="size-3.5" />
+                  <span>参加希望日時スロット *</span>
+                </Label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {experiment.slots.map((slot: any) => {
+                    const booked = slot.bookedCount ?? slot.currentParticipants ?? 0
+                    const capacity = slot.capacity ?? slot.maxParticipants ?? 1
+                    const isFull = booked >= capacity
                     const isSelected = selectedSlotId === slot.id
 
                     return (
@@ -361,140 +293,120 @@ export function ExperimentDialog({
                         type="button"
                         disabled={isFull}
                         onClick={() => setSelectedSlotId(slot.id)}
-                        className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                        className={`p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
                           isFull
-                            ? 'bg-muted/40 border-dashed border-border/80 opacity-60 cursor-not-allowed'
+                            ? 'opacity-50 cursor-not-allowed bg-muted/10'
                             : isSelected
-                            ? 'border-primary bg-primary/5 ring-1 ring-primary shadow-xs'
-                            : 'hover:border-primary/50 bg-card'
+                            ? 'border-primary bg-primary/10 text-primary font-bold'
+                            : 'hover:border-foreground/40 bg-card'
                         }`}
                       >
-                        <div className="flex items-center justify-between w-full">
-                          <span className="text-xs font-bold text-foreground">
-                            {slot.date}
-                          </span>
-                          {isFull ? (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] px-1.5 py-0 bg-muted text-muted-foreground border-border"
-                            >
-                              満席
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="secondary"
-                              className="text-[10px] px-1.5 py-0 text-primary font-medium"
-                            >
-                              残り {spotsRemaining} / {totalSpots} 枠
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-1">
-                          <Clock className="size-3" />
-                          <span>{slot.time}</span>
-                        </div>
+                        <span className="font-mono">{slot.time || '日時枠'}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {isFull ? '満員' : `残り ${capacity - booked}枠`}
+                        </span>
                       </button>
                     )
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* 本名（必須）セクション */}
+            <div className="space-y-3 p-4 rounded-xl border bg-card/60">
+              <div className="flex items-center justify-between border-b pb-2">
+                <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <UserCheck className="size-4 text-primary" />
+                  <span>実験参加名義（本名）</span>
+                </span>
+                <Badge variant="outline" className="text-[9px] text-rose-500 border-rose-500/30">
+                  必須
+                </Badge>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-relaxed flex items-start gap-1.5">
+                <Lock className="size-3.5 shrink-0 mt-0.5 text-muted-foreground" />
+                <span>
+                  本名は研究室・実験主催者の出席名簿および謝礼受領確認にのみ使用され、一般に公開されることはありません。
+                </span>
+              </p>
+
+              {loadingProfile ? (
+                <div className="py-2 text-center text-xs text-muted-foreground flex items-center justify-center gap-1.5">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span>名義情報を確認中...</span>
+                </div>
+              ) : hasExistingRealName ? (
+                // 登録済みの場合
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-bold text-foreground">{realNameNative}</p>
+                    <p className="text-[11px] text-muted-foreground font-mono">{realNameEnglish}</p>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                    プロフィール登録済み
+                  </Badge>
+                </div>
               ) : (
-                <div className="p-3 text-center text-xs text-muted-foreground border rounded-xl">
-                  日時スロットの指定はありません。研究室からの個別連絡となります。
+                // 未登録の場合
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground font-medium">
+                      母国語表記（漢字・ひらがな等）*
+                    </Label>
+                    <Input
+                      placeholder="例: 慶應 太郎 / 张伟"
+                      value={realNameNative}
+                      onChange={(e) => setRealNameNative(e.target.value)}
+                      className="text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground font-medium">
+                      英語・ローマ字表記 *
+                    </Label>
+                    <Input
+                      placeholder="例: Taro Keio / Wei Zhang"
+                      value={realNameEnglish}
+                      onChange={(e) => setRealNameEnglish(e.target.value)}
+                      className="text-xs font-mono"
+                    />
+                  </div>
                 </div>
               )}
             </div>
-          )}
 
-          {/* オンライン調査セクション */}
-          {experiment.mode === 'online' && (
-            <div className="space-y-3 p-3.5 rounded-xl border bg-sky-500/5 border-sky-500/20">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-foreground block">
-                  Step 1. アンケートに回答
-                </span>
-                <p className="text-[11px] text-muted-foreground">
-                  以下のリンクを開き、アンケートに最後まで回答してください。
-                </p>
-                {experiment.surveyUrl && (
-                  <a
-                    href={experiment.surveyUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline mt-1"
-                  >
-                    <span>アンケートフォームを開く</span>
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                )}
+            {/* エラーメッセージ */}
+            {errorMessage && (
+              <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{errorMessage}</span>
               </div>
+            )}
 
-              <div className="space-y-1.5 pt-2 border-t border-sky-500/10">
-                <Label htmlFor="code" className="text-xs font-bold text-foreground block">
-                  Step 2. 回答完了コードを入力
-                </Label>
-                <Input
-                  id="code"
-                  placeholder="アンケートの最後に表示されたコード"
-                  value={completionCodeInput}
-                  onChange={(e) => setCompletionCodeInput(e.target.value)}
-                  className="text-xs font-mono"
-                />
-              </div>
+            {/* フッターアクション */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t">
+              <Button variant="outline" size="sm" onClick={handleClose} className="text-xs">
+                キャンセル
+              </Button>
+              <Button
+                size="sm"
+                disabled={
+                  loading ||
+                  !realNameNative.trim() ||
+                  !realNameEnglish.trim() ||
+                  (Boolean(experiment.slots?.length) && !selectedSlotId)
+                }
+                onClick={handleApply}
+                className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-28"
+              >
+                {loading ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+                <span>応募を確定する</span>
+              </Button>
             </div>
-          )}
-
-          {/* メッセージ */}
-          {errorMsg && (
-            <div className="p-2.5 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
-              <AlertCircle className="size-4 shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {successMsg && (
-            <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-600 text-xs flex items-center gap-2 font-bold">
-              <CheckCircle2 className="size-4 shrink-0" />
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          {/* フッター */}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              className="text-xs"
-            >
-              {isJa ? '閉じる' : 'Close'}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={isSubmitting || (experiment.mode === 'in-person' && !selectedSlotId)}
-              onClick={handleApply}
-              className="gap-1.5 text-xs font-bold bg-primary text-primary-foreground"
-            >
-              {isSubmitting ? (
-                isJa ? '送信中...' : 'Submitting...'
-              ) : (
-                <>
-                  <CheckCircle2 className="size-3.5" />
-                  <span>
-                    {experiment.mode === 'online'
-                      ? isJa
-                        ? 'コードを提出して参加確定'
-                        : 'Submit Code'
-                      : isJa
-                      ? 'この枠で予約を確定する'
-                      : 'Confirm Slot'}
-                  </span>
-                </>
-              )}
-            </Button>
           </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   )

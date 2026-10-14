@@ -53,6 +53,8 @@ type ActiveTab = 'basic' | 'history' | 'wallet' | 'settings' | 'support'
 
 interface ProfileData {
   name: string
+  realNameNative: string   // 母国語表記 (例: 慶應 太郎 / 张伟)
+  realNameEnglish: string  // 英語・ローマ字表記 (例: Taro Keio / Wei Zhang)
   email: string
   faculty: string
   grade: string
@@ -94,6 +96,8 @@ export default function ProfilePage() {
   // プロフィール情報（ゲスト用デフォルト）
   const [profile, setProfile] = useState<ProfileData>({
     name: 'ゲストユーザー',
+    realNameNative: '',
+    realNameEnglish: '',
     email: '未ログイン',
     faculty: '未設定',
     grade: '未設定',
@@ -120,6 +124,8 @@ export default function ProfilePage() {
       if (user) {
         let baseProfile: ProfileData = {
           name: user.user_metadata?.full_name || '学生ユーザー',
+          realNameNative: '',
+          realNameEnglish: '',
           email: user.email || '',
           faculty: user.user_metadata?.faculty || '未設定',
           grade: '学部生',
@@ -168,6 +174,8 @@ export default function ProfilePage() {
 
           if (!error && data) {
             if (data.full_name) baseProfile.name = data.full_name
+            if (data.real_name_native) baseProfile.realNameNative = data.real_name_native
+            if (data.real_name_english) baseProfile.realNameEnglish = data.real_name_english
             if (data.faculty) baseProfile.faculty = data.faculty
             if (typeof data.labo_coins === 'number') baseProfile.laboCoins = data.labo_coins
             if (typeof data.item_pin_count === 'number') baseProfile.itemPinCount = data.item_pin_count
@@ -178,7 +186,6 @@ export default function ProfilePage() {
               verified = true
               verifiedAcademicEmail = data.academic_email
               verifiedInstitution = data.academic_institution || '慶應義塾大学'
-              // localStorage側も同期
               try {
                 localStorage.setItem(
                   `academic_verified_${user.id}`,
@@ -190,7 +197,6 @@ export default function ProfilePage() {
                 )
               } catch (e) {}
             } else if (data.is_academic_verified === false && !emailCheck.isVerified) {
-              // DB側で明示的に false になっていれば未認証に合わせる
               verified = false
               verifiedAcademicEmail = null
               verifiedInstitution = '未認証'
@@ -212,6 +218,8 @@ export default function ProfilePage() {
             const parsed = JSON.parse(cached)
             baseProfile = {
               ...baseProfile,
+              realNameNative: parsed.realNameNative || baseProfile.realNameNative,
+              realNameEnglish: parsed.realNameEnglish || baseProfile.realNameEnglish,
               dominantHand: parsed.dominantHand || baseProfile.dominantHand,
               vision: parsed.vision || baseProfile.vision,
               grade: parsed.grade || baseProfile.grade,
@@ -226,6 +234,8 @@ export default function ProfilePage() {
       } else {
         const guestProfile: ProfileData = {
           name: 'ゲストユーザー',
+          realNameNative: '',
+          realNameEnglish: '',
           email: 'ログインしていません',
           faculty: '未登録',
           grade: '未設定',
@@ -305,6 +315,8 @@ export default function ProfilePage() {
         .from('user_profiles')
         .update({
           full_name: formData.name,
+          real_name_native: formData.realNameNative,
+          real_name_english: formData.realNameEnglish,
           faculty: formData.faculty,
           updated_at: new Date().toISOString(),
         })
@@ -471,6 +483,11 @@ export default function ProfilePage() {
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
+                {profile.realNameNative && profile.realNameEnglish ? (
+                  <span className="font-semibold text-foreground/80 mr-2">
+                    {profile.realNameNative} ({profile.realNameEnglish}) ·
+                  </span>
+                ) : null}
                 {profile.faculty} · {profile.grade} · {profile.email}
               </p>
             </div>
@@ -704,13 +721,13 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* 基本属性情報 */}
+            {/* 基本属性情報 & 実験参加名義 */}
             <div className="rounded-2xl border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">基本属性情報</h3>
+                  <h3 className="text-sm font-bold text-foreground">基本属性情報 & 実験参加名義</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    実験応募時の条件スクリーニングや自動入力に使用されます。
+                    本名は実験の主催者（研究室・教授）の名簿にのみ出席・謝礼受領確認用として共有されます。
                   </p>
                 </div>
                 {!user ? (
@@ -725,18 +742,21 @@ export default function ProfilePage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                {/* ニックネーム */}
                 <div className="space-y-1.5">
-                  <label className="text-muted-foreground font-medium">氏名 *</label>
+                  <label className="text-muted-foreground font-medium">表示名（ニックネーム）</label>
                   <Input
                     readOnly={!isEditing}
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
+                    placeholder="例: たろう"
                   />
                 </div>
 
+                {/* アカウントメール */}
                 <div className="space-y-1.5">
-                  <label className="text-muted-foreground font-medium">アカウントメール *</label>
+                  <label className="text-muted-foreground font-medium">アカウントメール</label>
                   <Input
                     readOnly={true}
                     value={formData.email}
@@ -744,6 +764,37 @@ export default function ProfilePage() {
                   />
                 </div>
 
+                {/* 本名（母国語表記） */}
+                <div className="space-y-1.5">
+                  <label className="text-foreground font-bold flex items-center gap-1.5">
+                    <span>本名（母国語表記・漢字等）</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 text-rose-500 border-rose-500/30">必須</Badge>
+                  </label>
+                  <Input
+                    readOnly={!isEditing}
+                    value={formData.realNameNative}
+                    onChange={(e) => setFormData({ ...formData, realNameNative: e.target.value })}
+                    className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
+                    placeholder="例: 慶應 太郎 / 张伟"
+                  />
+                </div>
+
+                {/* 本名（英語・ローマ字表記） */}
+                <div className="space-y-1.5">
+                  <label className="text-foreground font-bold flex items-center gap-1.5">
+                    <span>本名（英語・ローマ字表記）</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 text-rose-500 border-rose-500/30">必須</Badge>
+                  </label>
+                  <Input
+                    readOnly={!isEditing}
+                    value={formData.realNameEnglish}
+                    onChange={(e) => setFormData({ ...formData, realNameEnglish: e.target.value })}
+                    className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
+                    placeholder="例: Taro Keio / Wei Zhang"
+                  />
+                </div>
+
+                {/* 所属・学部 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">所属大学・学部・研究科</label>
                   <Input
@@ -754,6 +805,7 @@ export default function ProfilePage() {
                   />
                 </div>
 
+                {/* 学年 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">学年</label>
                   <Input
@@ -764,6 +816,7 @@ export default function ProfilePage() {
                   />
                 </div>
 
+                {/* 利き手 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">利き手</label>
                   <Input
@@ -774,6 +827,7 @@ export default function ProfilePage() {
                   />
                 </div>
 
+                {/* 視力 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">視力・矯正</label>
                   <Input

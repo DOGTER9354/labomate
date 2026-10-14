@@ -23,6 +23,8 @@ import { EXPERIMENTS } from '@/lib/experiments'
 import { useAuth } from '@/lib/auth-context'
 import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
 
+const DELETED_EXP_STORAGE_KEY = 'labomate_deleted_experiments'
+
 export default function ManagePage() {
   const { language } = useLanguage()
   const isJa = language === 'ja'
@@ -47,9 +49,17 @@ export default function ManagePage() {
     setCreateDialogOpen(true)
   }
 
-  // 募集実験一覧を取得（Supabase + サンプルデータ）
+  // 募集実験一覧を取得（取り下げ済みIDを除外）
   const fetchExperiments = useCallback(async () => {
     setLoading(true)
+
+    // 削除済みIDリストを取得
+    let deletedIds: string[] = []
+    try {
+      const cached = localStorage.getItem(DELETED_EXP_STORAGE_KEY)
+      if (cached) deletedIds = JSON.parse(cached)
+    } catch (e) {}
+
     try {
       const { data, error } = await supabase
         .from('experiments')
@@ -57,14 +67,13 @@ export default function ManagePage() {
         .order('created_at', { ascending: false })
 
       if (!error && data && data.length > 0) {
-        setMyExperiments(data)
+        setMyExperiments(data.filter((item) => !deletedIds.includes(item.id)))
       } else {
-        // 初期サンプル
-        setMyExperiments(EXPERIMENTS.slice(0, 3))
+        setMyExperiments(EXPERIMENTS.slice(0, 3).filter((item) => !deletedIds.includes(item.id)))
       }
     } catch (e) {
       console.error(e)
-      setMyExperiments(EXPERIMENTS.slice(0, 3))
+      setMyExperiments(EXPERIMENTS.slice(0, 3).filter((item) => !deletedIds.includes(item.id)))
     } finally {
       setLoading(false)
     }
@@ -80,21 +89,38 @@ export default function ManagePage() {
     setIsDeleting(true)
 
     try {
-      // 1. Supabase から削除を試行
-      const { error } = await supabase
+      // 1. Supabase の experiments テーブルから削除
+      const { error: dbError } = await supabase
         .from('experiments')
         .delete()
         .eq('id', deletingId)
 
-      if (error) {
-        console.warn('Supabase delete error (fallback to local filter):', error)
+      if (dbError) {
+        console.warn('DB delete warning:', dbError)
       }
 
-      // 2. ローカルステートからも即座に除外
+      // 2. 関連する応募記録（applications）も取り消し
+      await supabase
+        .from('applications')
+        .update({ status: '中止・募集終了' })
+        .eq('experiment_id', deletingId)
+
+      // 3. ローカルの削除済みリストに登録（サンプルデータの即時非表示対応）
+      try {
+        const cached = localStorage.getItem(DELETED_EXP_STORAGE_KEY)
+        const current = cached ? JSON.parse(cached) : []
+        localStorage.setItem(
+          DELETED_EXP_STORAGE_KEY,
+          JSON.stringify([...current, deletingId])
+        )
+      } catch (e) {}
+
+      // 4. UIリストから即座に除外
       setMyExperiments((prev) => prev.filter((exp) => exp.id !== deletingId))
       setDeletingId(null)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Delete experiment error:', err)
+      alert(err.message || '募集の取り下げに失敗しました。')
     } finally {
       setIsDeleting(false)
     }
@@ -113,7 +139,6 @@ export default function ManagePage() {
             <span>{isJa ? '探す（トップ）に戻る' : 'Back to Explore'}</span>
           </Link>
 
-          {/* ログインガード付きボタン */}
           <Button
             size="sm"
             onClick={handleOpenCreateModal}
@@ -126,7 +151,7 @@ export default function ManagePage() {
       </div>
 
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-8 space-y-6">
-        {/* ヘッダー・募集促進カード */}
+        {/* ヘッダーカード */}
         <section className="rounded-2xl border bg-gradient-to-br from-primary/10 via-card to-card p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -144,7 +169,6 @@ export default function ManagePage() {
             </p>
           </div>
 
-          {/* ログインガード付きボタン */}
           <Button
             onClick={handleOpenCreateModal}
             className="h-9 px-4 text-xs font-bold gap-1.5 shrink-0 bg-primary text-primary-foreground shadow-sm self-start sm:self-auto"
@@ -234,7 +258,6 @@ export default function ManagePage() {
 
                   {/* アクション群 */}
                   <div className="flex items-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0">
-                    {/* 削除・取り下げボタン */}
                     <Button
                       size="sm"
                       variant="ghost"

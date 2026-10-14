@@ -37,6 +37,7 @@ import { supabase } from '@/lib/supabase'
 type StudyModeTab = 'all' | 'in-person' | 'online'
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
+const DELETED_EXP_STORAGE_KEY = 'labomate_deleted_experiments'
 
 interface UserApplicationRecord {
   id: string
@@ -125,8 +126,19 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabaseから最新データを取得
+  // Supabaseから最新データを取得（取り下げ済みIDを除外）
   const fetchExperiments = useCallback(async () => {
+    // 削除・取り下げ済みIDを取得
+    let deletedIds: string[] = []
+    try {
+      const cached = localStorage.getItem(DELETED_EXP_STORAGE_KEY)
+      if (cached) {
+        deletedIds = JSON.parse(cached)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+
     try {
       const { data, error } = await supabase
         .from('experiments')
@@ -135,11 +147,14 @@ export function Dashboard() {
 
       if (error) {
         console.error('Supabase fetch error:', error)
+        // エラー時も固定サンプルから削除済みを除外して表示
+        setExperiments(EXPERIMENTS.filter((e) => !deletedIds.includes(e.id)))
         return
       }
 
+      let mapped: Experiment[] = []
       if (data && data.length > 0) {
-        const mapped: Experiment[] = data.map((item: any) => {
+        mapped = data.map((item: any) => {
           const isOnline =
             Boolean(item.survey_url) ||
             item.format?.includes('オンライン') ||
@@ -199,11 +214,16 @@ export function Dashboard() {
             slots: parsedSlots,
           } as any
         })
-
-        setExperiments([...mapped, ...EXPERIMENTS])
       }
+
+      // Supabaseのデータと初期サンプルを結合し、取り下げ済みIDを除外
+      const combined = [...mapped, ...EXPERIMENTS].filter(
+        (exp) => !deletedIds.includes(exp.id)
+      )
+      setExperiments(combined)
     } catch (err) {
       console.error('Error fetching experiments:', err)
+      setExperiments(EXPERIMENTS.filter((e) => !deletedIds.includes(e.id)))
     }
   }, [])
 
@@ -318,9 +338,7 @@ export function Dashboard() {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
-        {/* ========================================================== */}
-        {/* 🌟 最上部：被験者アクティブ・ダッシュボード（直近の参加予定） */}
-        {/* ========================================================== */}
+        {/* 最上部：被験者アクティブ・ダッシュボード（直近の参加予定） */}
         {nextBooking ? (
           <section
             aria-label="Your Next Session"
@@ -401,7 +419,6 @@ export function Dashboard() {
             </div>
           </section>
         ) : (
-          /* 予約が0件のときのスマート案内バー */
           <div className="rounded-xl border border-dashed bg-card/60 p-3 sm:p-4 flex items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2.5">
               <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -422,7 +439,7 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* 2大カテゴリ切り替えタブ（学内対面 vs オンライン回答） */}
+        {/* 2大カテゴリ切り替えタブ */}
         <div className="rounded-2xl border bg-card/60 p-2 shadow-sm backdrop-blur">
           <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
             <button
@@ -494,7 +511,6 @@ export function Dashboard() {
             </button>
           </div>
 
-          {/* コイン付与レートの案内バナー */}
           <div className="mt-2 pt-2 border-t flex flex-wrap items-center justify-between px-2 text-[11px] text-muted-foreground gap-1">
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
@@ -529,7 +545,6 @@ export function Dashboard() {
             </p>
           </div>
 
-          {/* 🔃 リロードボタン */}
           <Button
             variant="outline"
             size="sm"
