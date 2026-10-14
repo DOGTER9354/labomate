@@ -25,6 +25,8 @@ import {
   Globe2,
   UserCheck,
   Lock,
+  Gift,
+  CircleDollarSign,
 } from 'lucide-react'
 import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
@@ -103,7 +105,7 @@ export function ExperimentDialog({
 
   if (!experiment) return null
 
-  // 応募実行
+  // 応募実行（枠数の減算同期を含む）
   const handleApply = async () => {
     setErrorMessage(null)
 
@@ -145,23 +147,70 @@ export function ExperimentDialog({
       const selectedSlot = experiment.slots?.find((s) => s.id === selectedSlotId)
       const slotTimeText = selectedSlot?.time || '日時指定なし'
 
-      const { error: applyError } = await supabase.from('applications').insert({
+      const applyPayload: any = {
         experiment_id: experiment.id,
         experiment_title: experiment.title,
-        applicant_id: user.id,
         applicant_email: user.email,
         applicant_name: cleanNative,
         applicant_name_native: cleanNative,
         applicant_name_english: cleanEnglish,
+        slot_id: selectedSlotId, // ★ スロットIDを確実に保存
         slot_time: slotTimeText,
         format: experiment.mode === 'online' || experiment.location?.includes('オンライン') ? 'オンライン' : '対面',
         status: '確定',
         applied_at: new Date().toISOString(),
-      })
+      }
 
-      if (applyError) throw applyError
+      if (user.id) {
+        applyPayload.applicant_id = user.id
+      }
 
-      // 3. 親コンポーネント（dashboard.tsx）の予約確定ハンドラーを呼ぶ
+      const { error: applyError } = await supabase.from('applications').insert(applyPayload)
+
+      if (applyError) {
+        if (applyError.message?.includes('applicant_id')) {
+          delete applyPayload.applicant_id
+          const { error: retryError } = await supabase.from('applications').insert(applyPayload)
+          if (retryError) throw retryError
+        } else {
+          throw applyError
+        }
+      }
+
+      // 3. experiments テーブルの枠数を減算更新 (spots_left - 1 & スロットの bookedCount + 1)
+      try {
+        const expAny = experiment as any
+        const currentSpotsLeft = Number(expAny.spotsLeft ?? expAny.spots_left ?? 10)
+        const updatedSpotsLeft = Math.max(0, currentSpotsLeft - 1)
+
+        let updatedSlots = expAny.slots
+        if (Array.isArray(updatedSlots) && selectedSlotId) {
+          updatedSlots = updatedSlots.map((slot: any) => {
+            if (slot.id === selectedSlotId) {
+              const currentBooked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
+              return { ...slot, bookedCount: currentBooked + 1 }
+            }
+            return slot
+          })
+        }
+
+        // DBに存在するレコードのみ更新を試行
+        const { error: updateExpErr } = await supabase
+          .from('experiments')
+          .update({
+            spots_left: updatedSpotsLeft,
+            slots: updatedSlots,
+          })
+          .eq('id', experiment.id)
+
+        if (updateExpErr) {
+          console.warn('DB spots_left update notice (safe fallback applied):', updateExpErr.message || updateExpErr)
+        }
+      } catch (slotUpdateErr) {
+        console.warn('Failed to update remaining spots in DB:', slotUpdateErr)
+      }
+
+      // 4. 親コンポーネント（dashboard.tsx）に通知して画面側の枠数も即時更新
       if (onConfirm && selectedSlotId) {
         onConfirm(experiment.id, selectedSlotId)
       }
@@ -187,18 +236,41 @@ export function ExperimentDialog({
 
   const isOnline = experiment.mode === 'online' || experiment.location?.includes('オンライン')
 
-  // 謝礼表示の整形
-  const rewardDisplayText =
-    typeof (experiment as any).rewardAmount === 'number'
-      ? `¥${(experiment as any).rewardAmount.toLocaleString()}`
-      : typeof (experiment as any).reward === 'number'
-      ? `¥${(experiment as any).reward.toLocaleString()}`
-      : (experiment as any).reward || (experiment as any).rewardAmount || '謝礼あり'
+  // 謝礼種別（内容）と 謝礼金額／詳細の分離ロジック
+  const expAny = experiment as any
+  const rewardType = expAny.rewardType || expAny.reward_type || (expAny.reward?.includes('¥') ? '現金' : '謝礼あり')
+  const rawAmount = typeof expAny.rewardAmount === 'number' ? expAny.rewardAmount : (Number(expAny.reward_amount) || 0)
+
+  // 謝礼種別の表示文字列
+  const typeDisplay =
+    rewardType === '謝礼なし'
+      ? '謝礼なし'
+      : rewardType.includes('Amazon')
+      ? 'Amazonギフト券'
+      : rewardType.includes('現金')
+      ? '現金（手渡し）'
+      : rewardType || 'その他'
+
+  // 謝礼金額または詳細の表示文字列
+  let valueDisplay = ''
+  if (rewardType === '謝礼なし') {
+    valueDisplay = 'なし (0円)'
+  } else if (rawAmount > 0) {
+    valueDisplay = `¥${rawAmount.toLocaleString()}`
+  } else if (expAny.reward && expAny.reward !== rewardType) {
+    valueDisplay = expAny.reward
+  } else {
+    valueDisplay = '支給あり'
+  }
+
+  const earnedCoins = isOnline ? 20 : (expAny.rewardCoins || expAny.coins || 100)
 
   const durationText =
-    typeof (experiment as any).durationMinutes === 'number'
-      ? `${(experiment as any).durationMinutes}分`
-      : (experiment as any).duration || '約30分'
+    typeof expAny.durationMinutes === 'number'
+      ? `${expAny.durationMinutes}分`
+      : typeof expAny.duration_mins === 'number'
+      ? `${expAny.duration_mins}分`
+      : expAny.duration || '約30分'
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -217,7 +289,7 @@ export function ExperimentDialog({
               )}
             </Badge>
             <span className="text-xs text-muted-foreground font-medium">
-              {(experiment as any).labName || (experiment as any).organizer || '研究室'}
+              {expAny.labName || expAny.lab_name || expAny.organizer || '研究室'}
             </span>
           </div>
 
@@ -241,35 +313,59 @@ export function ExperimentDialog({
           </div>
         ) : (
           <div className="space-y-5 pt-2">
-            {/* 謝礼・場所・時間などの基本情報 */}
-            <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-muted/30 border text-xs">
-              <div className="space-y-1">
-                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <Coins className="size-3.5 text-amber-500" />
-                  <span>謝礼 / コイン</span>
+            {/* 謝礼内容（種別）と 謝礼金額（詳細）を2つに独立して隣り合わせ表示 */}
+            <div className="grid grid-cols-2 gap-2.5 p-3.5 rounded-xl bg-muted/30 border text-xs">
+              {/* ① 謝礼種別 */}
+              <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
+                  <Gift className="size-3.5 text-rose-500" />
+                  <span>謝礼内容（種別）</span>
                 </span>
-                <p className="font-bold text-foreground">
-                  {rewardDisplayText}{' '}
-                  <span className="text-amber-500">
-                    +{(experiment as any).rewardCoins || (experiment as any).coins || 100} LC
-                  </span>
+                <p className="font-bold text-foreground text-sm truncate" title={typeDisplay}>
+                  {typeDisplay}
                 </p>
               </div>
 
-              <div className="space-y-1">
-                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <Clock className="size-3.5" />
-                  <span>所要時間</span>
+              {/* ② 謝礼金額 / 詳細 */}
+              <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
+                  <CircleDollarSign className="size-3.5 text-emerald-500" />
+                  <span>謝礼金額 / 詳細</span>
                 </span>
-                <p className="font-bold text-foreground">{durationText}</p>
+                <p className="font-bold text-emerald-600 dark:text-emerald-400 text-sm truncate" title={valueDisplay}>
+                  {valueDisplay}
+                </p>
               </div>
 
-              <div className="col-span-2 space-y-1 pt-1 border-t">
-                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <MapPin className="size-3.5" />
+              {/* ③ 獲得コイン */}
+              <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 space-y-1">
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium">
+                  <Coins className="size-3.5 text-amber-500" />
+                  <span>獲得コイン</span>
+                </span>
+                <p className="font-bold text-amber-500 text-sm">
+                  +{earnedCoins} <span className="text-xs font-normal">LC</span>
+                </p>
+              </div>
+
+              {/* ④ 所要時間 */}
+              <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
+                  <Clock className="size-3.5 text-primary" />
+                  <span>所要時間</span>
+                </span>
+                <p className="font-bold text-foreground text-xs">{durationText}</p>
+              </div>
+
+              {/* ⑤ 集合・実施場所（全幅） */}
+              <div className="col-span-2 p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
+                  <MapPin className="size-3.5 text-muted-foreground" />
                   <span>集合・実施場所</span>
                 </span>
-                <p className="font-bold text-foreground">{experiment.location || '詳細は応募完了後に連絡'}</p>
+                <p className="font-bold text-foreground text-xs truncate" title={experiment.location || '詳細は応募後に案内'}>
+                  {experiment.location || '詳細は応募後に案内'}
+                </p>
               </div>
             </div>
 
@@ -282,8 +378,8 @@ export function ExperimentDialog({
                 </Label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   {experiment.slots.map((slot: any) => {
-                    const booked = slot.bookedCount ?? slot.currentParticipants ?? 0
-                    const capacity = slot.capacity ?? slot.maxParticipants ?? 1
+                    const booked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
+                    const capacity = Number(slot.capacity ?? slot.maxParticipants ?? 1)
                     const isFull = booked >= capacity
                     const isSelected = selectedSlotId === slot.id
 
@@ -297,13 +393,13 @@ export function ExperimentDialog({
                           isFull
                             ? 'opacity-50 cursor-not-allowed bg-muted/10'
                             : isSelected
-                            ? 'border-primary bg-primary/10 text-primary font-bold'
+                            ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
                             : 'hover:border-foreground/40 bg-card'
                         }`}
                       >
                         <span className="font-mono">{slot.time || '日時枠'}</span>
                         <span className="text-[10px] text-muted-foreground">
-                          {isFull ? '満員' : `残り ${capacity - booked}枠`}
+                          {isFull ? '満員' : `残り ${Math.max(0, capacity - booked)}枠`}
                         </span>
                       </button>
                     )
@@ -337,7 +433,6 @@ export function ExperimentDialog({
                   <span>名義情報を確認中...</span>
                 </div>
               ) : hasExistingRealName ? (
-                // 登録済みの場合
                 <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs">
                   <div>
                     <p className="font-bold text-foreground">{realNameNative}</p>
@@ -348,7 +443,6 @@ export function ExperimentDialog({
                   </Badge>
                 </div>
               ) : (
-                // 未登録の場合
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground font-medium">

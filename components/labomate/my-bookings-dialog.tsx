@@ -2,16 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Calendar,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  Loader2,
-  Building2,
-  Globe2,
-} from 'lucide-react'
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -20,132 +10,140 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useLanguage } from '@/lib/language-context'
+import {
+  Calendar,
+  Clock,
+  Building2,
+  Globe2,
+  XCircle,
+  Loader2,
+  CheckCircle2,
+} from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/lib/auth-context'
 
 interface MyBookingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onBookingCanceled?: () => void
+  onBookingCanceled?: (canceledExpId?: string, canceledSlotTime?: string | null) => void
 }
 
-interface BookingRecord {
+interface ApplicationItem {
   id: string
   experiment_id: string
   experiment_title: string
+  slot_id?: string | null
+  slot_time: string | null
   format: string
   status: string
-  slot_time: string | null
   applied_at: string
 }
-
-const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
 export function MyBookingsDialog({
   open,
   onOpenChange,
   onBookingCanceled,
 }: MyBookingsDialogProps) {
-  const { language } = useLanguage()
-  const isJa = language === 'ja'
-
-  const [bookings, setBookings] = useState<BookingRecord[]>([])
+  const { user } = useAuth()
+  const [applications, setApplications] = useState<ApplicationItem[]>([])
   const [loading, setLoading] = useState(false)
   const [cancelingId, setCancelingId] = useState<string | null>(null)
-  const [msg, setMsg] = useState<{ text: string; isError: boolean } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
-  const fetchBookings = useCallback(async () => {
-    let email = 'student@keio.jp'
-    let name = '周誠'
-    try {
-      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (parsed.email) email = parsed.email
-        if (parsed.name) name = parsed.name
-      }
-    } catch (e) {
-      console.error(e)
+  const fetchMyBookings = useCallback(async () => {
+    if (!user) {
+      setApplications([])
+      return
     }
 
     setLoading(true)
     try {
-      // メールアドレスまたは名前で一致する自分の予約を取得
       const { data, error } = await supabase
         .from('applications')
         .select('*')
-        .or(`applicant_email.eq.${email},applicant_name.eq.${name}`)
+        .or(`applicant_id.eq.${user.id},applicant_email.eq.${user.email}`)
         .neq('status', 'キャンセル済み')
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        setBookings(data)
-      } else {
-        // フォールバック: 全体取得（ローカル検証用）
-        const { data: fallbackData } = await supabase
-          .from('applications')
-          .select('*')
-          .neq('status', 'キャンセル済み')
-          .order('applied_at', { ascending: false })
-          .limit(10)
-        if (fallbackData) setBookings(fallbackData)
+        setApplications(data)
       }
-    } catch (e) {
-      console.error(e)
+    } catch (err) {
+      console.error('Failed to fetch bookings in dialog:', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (open) {
-      setMsg(null)
-      fetchBookings()
+      fetchMyBookings()
+      setNotice(null)
     }
-  }, [open, fetchBookings])
+  }, [open, fetchMyBookings])
 
-  const handleCancelBooking = async (booking: BookingRecord) => {
-    if (!window.confirm(isJa ? 'この参加予約をキャンセルしますか？' : 'Cancel this booking?')) {
+  // 予約キャンセル実行
+  const handleCancelBooking = async (app: ApplicationItem) => {
+    if (!window.confirm(`「${app.experiment_title}」の予約をキャンセルしますか？`)) {
       return
     }
 
-    setCancelingId(booking.id)
-    setMsg(null)
+    setCancelingId(app.id)
 
     try {
-      // 1. ステータスを「キャンセル済み」に変更
+      // 1. applications テーブルを「キャンセル済み」に更新
       const { error: appError } = await supabase
         .from('applications')
         .update({ status: 'キャンセル済み' })
-        .eq('id', booking.id)
+        .eq('id', app.id)
 
       if (appError) throw appError
 
-      // 2. experiments テーブルの残り枠 (spots_left) を 1 戻す
-      const { data: expData } = await supabase
-        .from('experiments')
-        .select('spots_left, spots_total')
-        .eq('id', booking.experiment_id)
-        .single()
+      // 2. RPC関数でDB側の枠数とスロット枠を確実に +1 復元
+      try {
+        const { error: rpcErr } = await supabase.rpc('restore_experiment_slot', {
+          target_exp_id: String(app.experiment_id),
+          target_slot_time: app.slot_time || '',
+        })
 
-      if (expData) {
-        const nextLeft = Math.min(expData.spots_total || 10, (expData.spots_left || 0) + 1)
-        await supabase
-          .from('experiments')
-          .update({ spots_left: nextLeft })
-          .eq('id', booking.experiment_id)
+        if (rpcErr) {
+          // RPCが存在しない場合のフォールバック（手動更新）
+          const { data: exp } = await supabase
+            .from('experiments')
+            .select('*')
+            .eq('id', app.experiment_id)
+            .single()
+
+          if (exp) {
+            const nextLeft = Math.min(Number(exp.spots_total || 10), Number(exp.spots_left || 0) + 1)
+            let slots = Array.isArray(exp.slots) ? exp.slots : typeof exp.slots === 'string' ? JSON.parse(exp.slots) : []
+            slots = slots.map((s: any) => {
+              if (s.time === app.slot_time || (app.slot_id && s.id === app.slot_id)) {
+                return { ...s, bookedCount: Math.max(0, Number(s.bookedCount || 1) - 1) }
+              }
+              return s
+            })
+
+            await supabase
+              .from('experiments')
+              .update({ spots_left: nextLeft, slots: slots })
+              .eq('id', app.experiment_id)
+          }
+        }
+      } catch (slotErr) {
+        console.warn('Slot restore notice:', slotErr)
       }
 
-      setMsg({
-        text: isJa ? '予約をキャンセルし、募集枠を返却しました。' : 'Booking canceled successfully.',
-        isError: false,
-      })
+      setNotice('予約をキャンセルし、募集枠を正常に返却しました。')
+      setApplications((prev) => prev.filter((item) => item.id !== app.id))
 
-      fetchBookings()
-      if (onBookingCanceled) onBookingCanceled()
+      // 3. 親コンポーネント（dashboard.tsx）に通知して画面側の枠数も即時復元
+      if (onBookingCanceled) {
+        onBookingCanceled(app.experiment_id, app.slot_time)
+      }
     } catch (err: any) {
-      console.error(err)
-      setMsg({ text: err.message || 'キャンセルに失敗しました。', isError: true })
+      console.error('Cancel booking error:', err)
+      alert(err.message || 'キャンセルに失敗しました。')
     } finally {
       setCancelingId(null)
     }
@@ -153,57 +151,51 @@ export function MyBookingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-        <DialogHeader className="space-y-1">
-          <DialogTitle className="text-base font-bold flex items-center gap-1.5">
-            <Calendar className="size-4 text-primary" />
-            <span>{isJa ? '参加予定の実験一覧' : 'My Upcoming Studies'}</span>
-          </DialogTitle>
+      <DialogContent className="max-w-md max-h-[85dvh] overflow-y-auto">
+        <DialogHeader className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Calendar className="size-4" />
+            </span>
+            <DialogTitle className="text-base font-bold text-foreground">
+              参加予定の実験一覧
+            </DialogTitle>
+          </div>
           <DialogDescription className="text-xs text-muted-foreground">
-            {isJa
-              ? 'あなたが現在予約・応募している実験の一覧です。'
-              : 'Review or cancel your upcoming registered sessions.'}
+            あなたが現在予約・応募している実験の一覧です。
           </DialogDescription>
         </DialogHeader>
 
-        {msg && (
-          <div
-            className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
-              msg.isError
-                ? 'bg-destructive/10 text-destructive'
-                : 'bg-emerald-500/10 text-emerald-600 font-semibold'
-            }`}
-          >
-            {msg.isError ? <AlertCircle className="size-4 shrink-0" /> : <CheckCircle2 className="size-4 shrink-0" />}
-            <span>{msg.text}</span>
+        {notice && (
+          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center gap-2">
+            <CheckCircle2 className="size-4 shrink-0" />
+            <span>{notice}</span>
           </div>
         )}
 
         <div className="space-y-3 pt-2">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground text-xs gap-2">
-              <Loader2 className="size-5 animate-spin" />
-              <span>{isJa ? '読み込み中...' : 'Loading...'}</span>
+            <div className="py-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              <span>予約情報を確認中...</span>
             </div>
-          ) : bookings.length === 0 ? (
-            <div className="text-center py-8 border rounded-xl bg-muted/20 space-y-1">
-              <p className="text-xs font-semibold text-foreground">
-                {isJa ? '現在予約中の実験はありません' : 'No upcoming bookings'}
-              </p>
+          ) : applications.length === 0 ? (
+            <div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center space-y-1.5">
+              <p className="text-xs font-bold text-foreground">現在予約中の実験はありません</p>
               <p className="text-[11px] text-muted-foreground">
-                {isJa ? '一覧から気になる実験に応募してみましょう！' : 'Explore and join lab studies!'}
+                一覧から気になる実験に応募してみましょう！
               </p>
             </div>
           ) : (
-            bookings.map((b) => (
-              <div
-                key={b.id}
-                className="p-3 rounded-xl border bg-card text-card-foreground shadow-xs flex flex-col justify-between gap-2.5"
-              >
-                <div className="space-y-1">
+            <div className="space-y-2.5">
+              {applications.map((app) => (
+                <div
+                  key={app.id}
+                  className="p-3.5 rounded-xl border bg-card/70 space-y-2.5 hover:border-foreground/30 transition-colors"
+                >
                   <div className="flex items-center justify-between gap-2">
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                      {b.format === 'オンライン' ? (
+                      {app.format === 'オンライン' ? (
                         <span className="flex items-center gap-1">
                           <Globe2 className="size-3" /> オンライン
                         </span>
@@ -213,46 +205,45 @@ export function MyBookingsDialog({
                         </span>
                       )}
                     </Badge>
-                    <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
-                      {b.status}
+                    <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                      {app.status || '確定'}
                     </span>
                   </div>
 
-                  <h4 className="text-xs font-bold leading-snug line-clamp-2 pt-1 text-foreground">
-                    {b.experiment_title}
-                  </h4>
-
-                  {b.slot_time && (
-                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground pt-0.5">
-                      <Clock className="size-3 text-foreground/70" />
-                      <span className="font-medium text-foreground">{b.slot_time}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between border-t pt-2 mt-1">
-                  <span className="text-[10px] text-muted-foreground">
-                    応募日: {new Date(b.applied_at).toLocaleDateString('ja-JP')}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={cancelingId === b.id}
-                    onClick={() => handleCancelBooking(b)}
-                    className="h-7 px-2 text-[11px] font-semibold text-destructive hover:bg-destructive/10"
-                  >
-                    {cancelingId === b.id ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : (
-                      <>
-                        <XCircle className="size-3 mr-1" />
-                        <span>{isJa ? 'キャンセル' : 'Cancel'}</span>
-                      </>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-foreground leading-snug">
+                      {app.experiment_title}
+                    </h4>
+                    {app.slot_time && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1 font-mono">
+                        <Clock className="size-3 text-primary" />
+                        <span>{app.slot_time}</span>
+                      </p>
                     )}
-                  </Button>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t text-[11px]">
+                    <span className="text-muted-foreground text-[10px]">
+                      応募日: {new Date(app.applied_at).toLocaleDateString('ja-JP')}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={cancelingId === app.id}
+                      onClick={() => handleCancelBooking(app)}
+                      className="h-7 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive gap-1"
+                    >
+                      {cancelingId === app.id ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <XCircle className="size-3" />
+                      )}
+                      <span>キャンセル</span>
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       </DialogContent>

@@ -33,6 +33,7 @@ import {
   type FilterId,
 } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/lib/auth-context'
 
 type StudyModeTab = 'all' | 'in-person' | 'online'
 
@@ -50,6 +51,7 @@ interface UserApplicationRecord {
 }
 
 export function Dashboard() {
+  const { user } = useAuth()
   const { t, language } = useLanguage()
   const isJa = language === 'ja'
 
@@ -88,26 +90,19 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabase からユーザー自身の予約履歴を同期取得
+  // Supabase からユーザー自身の予約履歴を同期取得（ログインユーザー基準）
   const fetchUserBookings = useCallback(async () => {
-    let email = 'student@keio.jp'
-    let name = '周誠'
-    try {
-      const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (parsed.email) email = parsed.email
-        if (parsed.name) name = parsed.name
-      }
-    } catch (e) {
-      console.error(e)
+    if (!user) {
+      setUserApplications([])
+      setBookings({})
+      return
     }
 
     try {
       const { data, error } = await supabase
         .from('applications')
         .select('*')
-        .or(`applicant_email.eq.${email},applicant_name.eq.${name}`)
+        .or(`applicant_id.eq.${user.id},applicant_email.eq.${user.email}`)
         .neq('status', 'キャンセル済み')
         .order('applied_at', { ascending: false })
 
@@ -116,7 +111,7 @@ export function Dashboard() {
         const bookingMap: Record<string, string> = {}
         data.forEach((app) => {
           if (app.experiment_id) {
-            bookingMap[app.experiment_id] = app.slot_id || 'booked'
+            bookingMap[app.experiment_id] = app.slot_time || 'booked'
           }
         })
         setBookings(bookingMap)
@@ -124,20 +119,15 @@ export function Dashboard() {
     } catch (err) {
       console.error('Failed to sync user bookings:', err)
     }
-  }, [])
+  }, [user])
 
-  // Supabaseから最新データを取得（取り下げ済みIDを除外）
+  // Supabaseから最新データを取得（取り下げ済みIDを除外 & 枠数・集まり状況の正確な反映）
   const fetchExperiments = useCallback(async () => {
-    // 削除・取り下げ済みIDを取得
     let deletedIds: string[] = []
     try {
       const cached = localStorage.getItem(DELETED_EXP_STORAGE_KEY)
-      if (cached) {
-        deletedIds = JSON.parse(cached)
-      }
-    } catch (e) {
-      console.error(e)
-    }
+      if (cached) deletedIds = JSON.parse(cached)
+    } catch (e) {}
 
     try {
       const { data, error } = await supabase
@@ -147,7 +137,6 @@ export function Dashboard() {
 
       if (error) {
         console.error('Supabase fetch error:', error)
-        // エラー時も固定サンプルから削除済みを除外して表示
         setExperiments(EXPERIMENTS.filter((e) => !deletedIds.includes(e.id)))
         return
       }
@@ -183,8 +172,24 @@ export function Dashboard() {
           const rewardText =
             item.reward ||
             (Number(item.reward_amount) > 0
-              ? formatYen(Number(item.reward_amount))
+              ? `${item.reward_type ? `${item.reward_type} ` : ''}${formatYen(Number(item.reward_amount))}`
               : item.reward_type || '謝礼なし')
+
+          // ★ 総定員（spotsTotal）の厳密な数値化
+          const spotsTotalVal =
+            Number(item.spots_total) ||
+            Number(item.max_participants) ||
+            (parsedSlots.length > 0
+              ? parsedSlots.reduce((acc, cur) => acc + (Number(cur.capacity) || 0), 0)
+              : 10)
+
+          // ★ 残り枠（spotsLeft）の厳密な数値化
+          const spotsLeftVal =
+            typeof item.spots_left === 'number'
+              ? Number(item.spots_left)
+              : item.spots_left !== undefined && item.spots_left !== null
+              ? Number(item.spots_left)
+              : spotsTotalVal
 
           return {
             id: item.id,
@@ -200,8 +205,10 @@ export function Dashboard() {
             rewardAmount: Number(item.reward_amount) || 0,
             rewardType: item.reward_type || 'Amazonギフト券',
             reward: rewardText,
-            spotsLeft: Number(item.spots_left) || Number(item.max_participants) || (parsedSlots.length > 0 ? parsedSlots.length : 10),
-            spotsTotal: Number(item.spots_total) || Number(item.max_participants) || (parsedSlots.length > 0 ? parsedSlots.length : 10),
+            spotsLeft: Math.max(0, spotsLeftVal),
+            spotsTotal: Math.max(1, spotsTotalVal),
+            spots_left: Math.max(0, spotsLeftVal),
+            spots_total: Math.max(1, spotsTotalVal),
             requirements: Array.isArray(item.requirements)
               ? item.requirements
               : item.requirements
@@ -216,7 +223,6 @@ export function Dashboard() {
         })
       }
 
-      // Supabaseのデータと初期サンプルを結合し、取り下げ済みIDを除外
       const combined = [...mapped, ...EXPERIMENTS].filter(
         (exp) => !deletedIds.includes(exp.id)
       )
@@ -232,7 +238,7 @@ export function Dashboard() {
     fetchUserBookings()
   }, [fetchExperiments, fetchUserBookings])
 
-  // 🔃 リロードボタンの押下ハンドラ
+  // 🔃 リロードボタン
   const handleRefresh = async () => {
     setIsRefreshing(true)
     try {
@@ -289,16 +295,35 @@ export function Dashboard() {
     setDialogOpen(true)
   }
 
-  // 直近の予約セッションを特定
+  // 直近の予約セッションを特定（有効なタイトルがある最新の応募）
   const nextBooking = userApplications.length > 0 ? userApplications[0] : null
   const nextExperiment = nextBooking
     ? experiments.find((e) => e.id === nextBooking.experiment_id)
     : null
 
-  // 実験応募確定処理
+  // 実験応募確定処理（即時ローカル更新 ＆ DB再同期）
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
+    // 1. 予約マップを即時更新
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
 
+    // 2. 実験カードの枠数を即座に画面反映（spotsLeft を -1）
+    setExperiments((prev) =>
+      prev.map((exp) => {
+        if (exp.id === experimentId) {
+          const expAny = exp as any
+          const currentLeft = Number(expAny.spotsLeft ?? expAny.spots_left ?? 10)
+          const newLeft = Math.max(0, currentLeft - 1)
+          return {
+            ...exp,
+            spotsLeft: newLeft,
+            spots_left: newLeft,
+          } as any
+        }
+        return exp
+      })
+    )
+
+    // 3. コイン加算
     const exp = experiments.find((e) => e.id === experimentId)
     const isOnline = exp?.mode === 'online'
     const earnedCoins = isOnline ? 20 : 100
@@ -323,7 +348,11 @@ export function Dashboard() {
       setToastMessage(null)
     }, 4000)
 
-    fetchUserBookings()
+    // 4. DBと完全再同期
+    setTimeout(() => {
+      fetchUserBookings()
+      fetchExperiments()
+    }, 300)
   }
 
   return (
@@ -356,7 +385,7 @@ export function Dashboard() {
                   variant="outline"
                   className="text-[10px] px-1.5 py-0 bg-background/80 text-emerald-600 border-emerald-500/30 font-semibold"
                 >
-                  {nextBooking.status}
+                  {nextBooking.status || '確定'}
                 </Badge>
               </div>
 
@@ -374,7 +403,7 @@ export function Dashboard() {
             <div className="pt-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1.5 min-w-0">
                 <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug truncate">
-                  {nextBooking.experiment_title}
+                  {nextBooking.experiment_title || nextExperiment?.title || '実験セッション'}
                 </h2>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -390,7 +419,7 @@ export function Dashboard() {
                   </span>
                   <span className="flex items-center gap-1 text-foreground/80 font-medium">
                     <Gift className="size-3.5 text-amber-500" />
-                    <span>謝礼: {(nextExperiment as any)?.reward || (nextExperiment?.rewardAmount ? formatYen(nextExperiment.rewardAmount) : 'Amazonギフト券')}</span>
+                    <span>謝礼: {(nextExperiment as any)?.reward || (nextExperiment?.rewardAmount ? formatYen(nextExperiment.rewardAmount) : '謝礼あり')}</span>
                   </span>
                 </div>
               </div>
@@ -616,9 +645,43 @@ export function Dashboard() {
       <MyBookingsDialog
         open={myBookingsOpen}
         onOpenChange={setMyBookingsOpen}
-        onBookingCanceled={() => {
-          fetchExperiments()
+        onBookingCanceled={(canceledExpId, canceledSlotTime) => {
+          // 1. ローカルステート上で該当実験の枠数とスロットを即座に復元
+          if (canceledExpId) {
+            setExperiments((prev) =>
+              prev.map((exp) => {
+                if (exp.id === canceledExpId) {
+                  const expAny = exp as any
+                  const total = Number(expAny.spotsTotal ?? expAny.spots_total ?? 10)
+                  const left = Number(expAny.spotsLeft ?? expAny.spots_left ?? 0)
+                  const newLeft = Math.min(total, left + 1)
+
+                  let newSlots = expAny.slots
+                  if (Array.isArray(newSlots) && canceledSlotTime) {
+                    newSlots = newSlots.map((slot: any) => {
+                      if (slot.time?.trim() === canceledSlotTime.trim()) {
+                        const booked = Number(slot.bookedCount ?? 1)
+                        return { ...slot, bookedCount: Math.max(0, booked - 1) }
+                      }
+                      return slot
+                    })
+                  }
+
+                  return {
+                    ...exp,
+                    spotsLeft: newLeft,
+                    spots_left: newLeft,
+                    slots: newSlots,
+                  } as any
+                }
+                return exp
+              })
+            )
+          }
+
+          // 2. 予約一覧と実験一覧を Supabase と完全再同期
           fetchUserBookings()
+          fetchExperiments()
         }}
       />
 

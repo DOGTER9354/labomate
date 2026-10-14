@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -11,19 +11,16 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import {
   Building2,
   Globe2,
   Calendar,
-  Coins,
-  MapPin,
-  Clock,
   Plus,
   Trash2,
   AlertCircle,
   Loader2,
   Sparkles,
+  Users,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -33,6 +30,13 @@ interface CreateExperimentDialogProps {
   onOpenChange: (open: boolean) => void
   onSuccess?: () => void
 }
+
+const REWARD_OPTIONS = [
+  '現金（手渡し）',
+  'Amazonギフト券',
+  'その他',
+  '謝礼なし',
+]
 
 export function CreateExperimentDialog({
   open,
@@ -48,21 +52,47 @@ export function CreateExperimentDialog({
   const [labName, setLabName] = useState('')
   const [location, setLocation] = useState('SFC オミクロン館')
   const [durationMins, setDurationMins] = useState('30')
-  const [rewardAmount, setRewardAmount] = useState('1000')
   const [rewardType, setRewardType] = useState('Amazonギフト券')
+  const [customRewardType, setCustomRewardType] = useState('')
+  const [rewardAmount, setRewardAmount] = useState('1000')
   const [description, setDescription] = useState('')
   const [surveyUrl, setSurveyUrl] = useState('')
 
-  // スロット設定
+  // スロット設定（対面実験用）
   const [slots, setSlots] = useState<{ id: string; time: string; capacity: number }[]>([
     { id: '1', time: '10/20 (火) 11:00-11:30', capacity: 3 },
     { id: '2', time: '10/20 (火) 13:00-13:30', capacity: 3 },
+    { id: '3', time: '10/21 (水) 13:00-13:30', capacity: 3 },
   ])
+
+  // 総募集人数ステート（手動編集可能）
+  const [totalSpots, setTotalSpots] = useState<number>(9)
+  const [isTotalManuallyEdited, setIsTotalManuallyEdited] = useState(false)
+
+  // スロット変更時に自動計算（手動編集されていない場合のみ自動連動）
+  useEffect(() => {
+    if (mode === 'in-person' && !isTotalManuallyEdited) {
+      const calculated = slots.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
+      setTotalSpots(calculated)
+    }
+  }, [slots, mode, isTotalManuallyEdited])
+
+  // モード切り替え時の初期値セット
+  const handleModeChange = (newMode: 'in-person' | 'online') => {
+    setMode(newMode)
+    setIsTotalManuallyEdited(false)
+    if (newMode === 'online') {
+      setTotalSpots(30)
+    } else {
+      const calculated = slots.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
+      setTotalSpots(calculated)
+    }
+  }
 
   const handleAddSlot = () => {
     setSlots((prev) => [
       ...prev,
-      { id: Date.now().toString(), time: '10/21 (水) 13:00-13:30', capacity: 3 },
+      { id: Date.now().toString(), time: '10/22 (木) 13:00-13:30', capacity: 3 },
     ])
   }
 
@@ -76,6 +106,16 @@ export function CreateExperimentDialog({
     )
   }
 
+  // スロット枠の合計値へワンクリックでリセット
+  const handleResetToSlotsTotal = () => {
+    const calculated = slots.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
+    setTotalSpots(calculated)
+    setIsTotalManuallyEdited(false)
+  }
+
+  // 金額入力が不要な種別判定（「その他」または「謝礼なし」）
+  const isAmountDisabled = rewardType === 'その他' || rewardType === '謝礼なし'
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMsg(null)
@@ -85,43 +125,82 @@ export function CreateExperimentDialog({
       return
     }
 
+    if (rewardType === 'その他' && !customRewardType.trim()) {
+      setErrorMsg('謝礼種別で「その他」を選択した場合は、謝礼の詳細を入力してください。')
+      return
+    }
+
+    if (totalSpots <= 0) {
+      setErrorMsg('総募集人数（枠）を1名以上に設定してください。')
+      return
+    }
+
     setLoading(true)
 
     try {
-      const totalCapacity = slots.reduce((sum, s) => sum + Number(s.capacity || 1), 0)
+      const finalRewardType =
+        rewardType === 'その他'
+          ? customRewardType.trim() || 'その他'
+          : rewardType
 
-      const { data, error } = await supabase.from('experiments').insert({
+      // 「その他」または「謝礼なし」の場合は金額を 0 に設定
+      const finalRewardAmount = isAmountDisabled
+        ? 0
+        : parseInt(rewardAmount) || 0
+
+      const newExperimentPayload: any = {
         title: title.trim(),
         lab_name: labName.trim() || '研究室',
         format: mode === 'online' ? 'オンライン' : '学内対面',
         location: mode === 'online' ? 'オンライン（Webアンケート）' : location.trim(),
         duration_mins: parseInt(durationMins) || 30,
-        reward_amount: parseInt(rewardAmount) || 0,
-        reward_type: rewardType.trim(),
+        reward_amount: finalRewardAmount,
+        reward_type: finalRewardType,
         description: description.trim(),
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
-        spots_total: totalCapacity,
-        spots_left: totalCapacity,
-        slots: slots.map((s) => ({
-          id: s.id,
-          time: s.time,
-          capacity: Number(s.capacity),
-          bookedCount: 0,
-        })),
-        created_by: user?.id,
+        spots_total: totalSpots,
+        spots_left: totalSpots,
+        slots:
+          mode === 'in-person'
+            ? slots.map((s) => ({
+                id: s.id,
+                time: s.time,
+                capacity: Number(s.capacity),
+                bookedCount: 0,
+              }))
+            : [],
         created_at: new Date().toISOString(),
-      }).select()
+      }
 
-      if (error) throw error
+      if (user?.id) {
+        newExperimentPayload.created_by = user.id
+      }
+
+      const { error } = await supabase
+        .from('experiments')
+        .insert(newExperimentPayload)
+
+      if (error) {
+        if (error.message?.includes('created_by')) {
+          delete newExperimentPayload.created_by
+          const { error: retryError } = await supabase
+            .from('experiments')
+            .insert(newExperimentPayload)
+          if (retryError) throw retryError
+        } else {
+          throw error
+        }
+      }
 
       if (onSuccess) {
         onSuccess()
       }
 
       onOpenChange(false)
-      // リセット
       setTitle('')
       setDescription('')
+      setCustomRewardType('')
+      setIsTotalManuallyEdited(false)
     } catch (err: any) {
       console.error('Create experiment error:', err)
       setErrorMsg(err.message || '募集の作成に失敗しました。')
@@ -152,7 +231,7 @@ export function CreateExperimentDialog({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => setMode('in-person')}
+              onClick={() => handleModeChange('in-person')}
               className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
                 mode === 'in-person'
                   ? 'border-primary bg-primary/10 text-primary shadow-xs'
@@ -164,7 +243,7 @@ export function CreateExperimentDialog({
             </button>
             <button
               type="button"
-              onClick={() => setMode('online')}
+              onClick={() => handleModeChange('online')}
               className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
                 mode === 'online'
                   ? 'border-primary bg-primary/10 text-primary shadow-xs'
@@ -176,6 +255,7 @@ export function CreateExperimentDialog({
             </button>
           </div>
 
+          {/* 実験タイトル */}
           <div className="space-y-1.5 text-xs">
             <Label className="font-bold text-foreground">実験タイトル *</Label>
             <Input
@@ -187,6 +267,7 @@ export function CreateExperimentDialog({
             />
           </div>
 
+          {/* 研究室名 & 場所 / URL */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="space-y-1.5">
               <Label className="text-muted-foreground font-medium">研究室名・プロジェクト名</Label>
@@ -221,33 +302,114 @@ export function CreateExperimentDialog({
             )}
           </div>
 
+          {/* 所要時間 & 謝礼種別 & 謝礼金額 */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div className="space-y-1.5">
               <Label className="text-muted-foreground font-medium">所要時間（分）</Label>
               <Input
                 type="number"
+                min="5"
                 value={durationMins}
                 onChange={(e) => setDurationMins(e.target.value)}
                 className="text-xs"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-muted-foreground font-medium">謝礼金額（円）</Label>
-              <Input
-                type="number"
-                value={rewardAmount}
-                onChange={(e) => setRewardAmount(e.target.value)}
-                className="text-xs"
-              />
-            </div>
+
             <div className="space-y-1.5">
               <Label className="text-muted-foreground font-medium">謝礼種別</Label>
-              <Input
+              <select
                 value={rewardType}
                 onChange={(e) => setRewardType(e.target.value)}
-                className="text-xs"
+                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {REWARD_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 謝礼金額（「その他」または「謝礼なし」の場合は入力不要＆グレーアウト） */}
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground font-medium">
+                謝礼金額（円）{isAmountDisabled && <span className="text-[10px] text-muted-foreground font-normal">（不要）</span>}
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                disabled={isAmountDisabled}
+                value={isAmountDisabled ? '0' : rewardAmount}
+                onChange={(e) => setRewardAmount(e.target.value)}
+                className="text-xs disabled:opacity-40 disabled:bg-muted/40"
               />
             </div>
+          </div>
+
+          {/* 「その他」選択時の詳細入力欄 */}
+          {rewardType === 'その他' && (
+            <div className="space-y-1.5 text-xs animate-in fade-in duration-200">
+              <Label className="font-bold text-foreground">
+                謝礼の詳細（その他） *
+              </Label>
+              <Input
+                required
+                placeholder="例: 図書カード1,000円分 / 特製ノベルティ・記念品 / カフェチケット"
+                value={customRewardType}
+                onChange={(e) => setCustomRewardType(e.target.value)}
+                className="text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                ※「その他」を選択した場合は金額の入力は不要です。被験者に渡す物品や特典の内容を入力してください。
+              </p>
+            </div>
+          )}
+
+          {/* 総募集人数の設定エリア（手動編集可能 & 自動連動表示） */}
+          <div className="p-3.5 rounded-xl border bg-muted/20 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="font-bold text-foreground flex items-center gap-1.5">
+                  <Users className="size-3.5 text-primary" />
+                  <span>総募集人数（定員）*</span>
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {mode === 'in-person'
+                    ? isTotalManuallyEdited
+                      ? '手動で編集された人数が適用されます'
+                      : 'スロット枠の定員合計から自動計算中'
+                    : 'オンライン回答を受け付ける上限人数'}
+                </p>
+              </div>
+
+              {/* 手動入力フィールド */}
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  min="1"
+                  value={totalSpots}
+                  onChange={(e) => {
+                    setTotalSpots(parseInt(e.target.value) || 0)
+                    setIsTotalManuallyEdited(true)
+                  }}
+                  className="w-20 text-center text-xs font-bold bg-background"
+                />
+                <span className="text-xs text-muted-foreground">名</span>
+              </div>
+            </div>
+
+            {/* 対面時：手動編集された場合に「スロット合計に戻す」ボタンを提供 */}
+            {mode === 'in-person' && isTotalManuallyEdited && (
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleResetToSlotsTotal}
+                  className="text-[10px] text-primary hover:underline"
+                >
+                  ↺ スロットの合計値にリセット
+                </button>
+              </div>
+            )}
           </div>
 
           {/* スロット設定（対面実験の場合） */}
@@ -270,7 +432,7 @@ export function CreateExperimentDialog({
                 </Button>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 pt-1">
                 {slots.map((s) => (
                   <div key={s.id} className="flex items-center gap-2">
                     <Input
@@ -284,8 +446,10 @@ export function CreateExperimentDialog({
                         type="number"
                         min="1"
                         value={s.capacity}
-                        onChange={(e) => handleSlotChange(s.id, 'capacity', e.target.value)}
-                        className="w-16 text-xs text-center"
+                        onChange={(e) =>
+                          handleSlotChange(s.id, 'capacity', parseInt(e.target.value) || 1)
+                        }
+                        className="w-16 text-xs text-center font-bold"
                         title="定員"
                       />
                       <span className="text-[11px] text-muted-foreground">名</span>
@@ -327,11 +491,11 @@ export function CreateExperimentDialog({
             <Button
               type="submit"
               size="sm"
-              disabled={loading}
+              disabled={loading || totalSpots <= 0}
               className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-28"
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}
-              <span>募集を公開する</span>
+              <span>募集を公開する（計{totalSpots}名）</span>
             </Button>
           </div>
         </form>
