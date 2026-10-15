@@ -166,7 +166,7 @@ export default function AboutPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <a
-                href="mailto:support@labomate.keio.jp"
+                href="mailto:support@colabo.keio.jp"
                 className="p-3.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center gap-3"
               >
                 <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -174,7 +174,7 @@ export default function AboutPage() {
                 </div>
                 <div>
                   <p className="font-bold text-foreground">メールでお問い合わせ</p>
-                  <p className="text-[11px] text-muted-foreground font-mono">support@labomate.keio.jp</p>
+                  <p className="text-[11px] text-muted-foreground font-mono">support@colabo.keio.jp</p>
                 </div>
               </a>
 
@@ -211,7 +211,7 @@ export default function AboutPage() {
           <div className="rounded-2xl border bg-card p-5 space-y-3 text-xs">
             <div className="flex items-center justify-between pb-3 border-b">
               <span className="text-muted-foreground">プロジェクト名</span>
-              <span className="font-bold text-foreground">Labomate Keio (慶應義塾学生研究支援プロジェクト)</span>
+              <span className="font-bold text-foreground">CoLabo Keio (慶應義塾学生研究支援プロジェクト)</span>
             </div>
             <div className="flex items-center justify-between pb-3 border-b">
               <span className="text-muted-foreground">対象キャンパス</span>

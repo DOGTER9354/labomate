@@ -1276,7 +1276,7 @@ export default function ProfilePage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <a
-                    href="mailto:labomate1005@gmail.com"
+                    href="mailto:colabo.support@gmail.com"
                     className="p-3.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center gap-3"
                   >
                     <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -1284,7 +1284,7 @@ export default function ProfilePage() {
                     </div>
                     <div>
                       <p className="font-bold text-foreground">運営事務局へメール</p>
-                      <p className="text-[11px] text-muted-foreground font-mono">labomate1005@gmail.com</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">colabo.support@gmail.com</p>
                     </div>
                   </a>
 
