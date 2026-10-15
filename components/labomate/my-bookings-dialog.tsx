@@ -18,6 +18,7 @@ import {
   XCircle,
   Loader2,
   CheckCircle2,
+  ExternalLink,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -26,6 +27,7 @@ interface MyBookingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onBookingCanceled?: (canceledExpId?: string, canceledSlotTime?: string | null) => void
+  onOpenExperimentDetails?: (experimentId: string) => void
 }
 
 interface ApplicationItem {
@@ -43,6 +45,7 @@ export function MyBookingsDialog({
   open,
   onOpenChange,
   onBookingCanceled,
+  onOpenExperimentDetails,
 }: MyBookingsDialogProps) {
   const { user } = useAuth()
   const [applications, setApplications] = useState<ApplicationItem[]>([])
@@ -63,10 +66,18 @@ export function MyBookingsDialog({
         .select('*')
         .or(`applicant_id.eq.${user.id},applicant_email.eq.${user.email}`)
         .neq('status', 'キャンセル済み')
+        .neq('status', '中止・募集終了')
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        setApplications(data)
+        // ★ 回答完了済みのオンライン回答はアクティブ予定から除外し、マイページ履歴へ送る
+        const activeOnly = data.filter((item) => {
+          if (item.status?.includes('回答完了') || item.status === '完了') {
+            return false
+          }
+          return true
+        })
+        setApplications(activeOnly)
       }
     } catch (err) {
       console.error('Failed to fetch bookings in dialog:', err)
@@ -82,7 +93,6 @@ export function MyBookingsDialog({
     }
   }, [open, fetchMyBookings])
 
-  // 予約キャンセル実行
   const handleCancelBooking = async (app: ApplicationItem) => {
     if (!window.confirm(`「${app.experiment_title}」の予約をキャンセルしますか？`)) {
       return
@@ -91,7 +101,6 @@ export function MyBookingsDialog({
     setCancelingId(app.id)
 
     try {
-      // 1. applications テーブルを「キャンセル済み」に更新
       const { error: appError } = await supabase
         .from('applications')
         .update({ status: 'キャンセル済み' })
@@ -99,7 +108,6 @@ export function MyBookingsDialog({
 
       if (appError) throw appError
 
-      // 2. RPC関数でDB側の枠数とスロット枠を確実に +1 復元
       try {
         const { error: rpcErr } = await supabase.rpc('restore_experiment_slot', {
           target_exp_id: String(app.experiment_id),
@@ -107,7 +115,6 @@ export function MyBookingsDialog({
         })
 
         if (rpcErr) {
-          // RPCが存在しない場合のフォールバック（手動更新）
           const { data: exp } = await supabase
             .from('experiments')
             .select('*')
@@ -124,6 +131,7 @@ export function MyBookingsDialog({
               return s
             })
 
+            // ★ 修正箇所：文法エラーを解消
             await supabase
               .from('experiments')
               .update({ spots_left: nextLeft, slots: slots })
@@ -134,10 +142,9 @@ export function MyBookingsDialog({
         console.warn('Slot restore notice:', slotErr)
       }
 
-      setNotice('予約をキャンセルし、募集枠を正常に返却しました。')
+      setNotice('予約をキャンセルしました。')
       setApplications((prev) => prev.filter((item) => item.id !== app.id))
 
-      // 3. 親コンポーネント（dashboard.tsx）に通知して画面側の枠数も即時復元
       if (onBookingCanceled) {
         onBookingCanceled(app.experiment_id, app.slot_time)
       }
@@ -181,9 +188,9 @@ export function MyBookingsDialog({
             </div>
           ) : applications.length === 0 ? (
             <div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center space-y-1.5">
-              <p className="text-xs font-bold text-foreground">現在予約中の実験はありません</p>
+              <p className="text-xs font-bold text-foreground">現在参加待ちの実験はありません</p>
               <p className="text-[11px] text-muted-foreground">
-                一覧から気になる実験に応募してみましょう！
+                回答完了・実施終了した実験はマイページの「実験履歴」で確認できます。
               </p>
             </div>
           ) : (
@@ -223,9 +230,21 @@ export function MyBookingsDialog({
                   </div>
 
                   <div className="flex items-center justify-between pt-2 border-t text-[11px]">
-                    <span className="text-muted-foreground text-[10px]">
-                      応募日: {new Date(app.applied_at).toLocaleDateString('ja-JP')}
-                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        onOpenChange(false)
+                        if (onOpenExperimentDetails) {
+                          onOpenExperimentDetails(app.experiment_id)
+                        }
+                      }}
+                      className="h-7 px-2.5 text-xs font-bold gap-1 bg-background"
+                    >
+                      <ExternalLink className="size-3" />
+                      <span>{app.format === 'オンライン' ? '回答・コード入力' : '詳細を確認'}</span>
+                    </Button>
+
                     <Button
                       size="sm"
                       variant="ghost"

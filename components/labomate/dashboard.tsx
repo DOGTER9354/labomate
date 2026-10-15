@@ -43,6 +43,7 @@ interface UserApplicationRecord {
   id: string
   experiment_id: string
   experiment_title: string
+  slot_id: string | null
   slot_time: string | null
   format: string
   status: string
@@ -65,7 +66,7 @@ export function Dashboard() {
   // 🔃 リロード処理中ステート
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // 予約済みの実験IDとスロット情報のマップ (expId -> slotTime)
+  // 予約済みの実験IDとスロット情報のマップ (expId -> slotId)
   const [bookings, setBookings] = useState<Record<string, string>>({})
   // ユーザーの応募レコード一覧（直近セッション特定用）
   const [userApplications, setUserApplications] = useState<UserApplicationRecord[]>([])
@@ -107,11 +108,15 @@ export function Dashboard() {
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        setUserApplications(data)
+        // ★ 回答完了・終了済みのものはアクティブ予定から除外（マイページの履歴へ）
+        const activeApps = data.filter(
+          (a) => !a.status?.includes('回答完了') && a.status !== '完了'
+        )
+        setUserApplications(activeApps)
         const bookingMap: Record<string, string> = {}
-        data.forEach((app) => {
+        activeApps.forEach((app) => {
           if (app.experiment_id) {
-            bookingMap[app.experiment_id] = app.slot_time || 'booked'
+            bookingMap[app.experiment_id] = app.slot_id ? String(app.slot_id) : 'booked'
           }
         })
         setBookings(bookingMap)
@@ -178,11 +183,10 @@ export function Dashboard() {
           )
           const totalBookedCount = expApps.length
 
+          // ★ 修正箇所：slot_id の厳格一致のみで各スロットの予約数をカウント
           const updatedSlots = parsedSlots.map((slot: any) => {
             const slotAppsCount = expApps.filter(
-              (a) =>
-                (a.slot_id && String(a.slot_id) === String(slot.id)) ||
-                (a.slot_time && a.slot_time.trim() === slot.time?.trim())
+              (a) => a.slot_id && String(a.slot_id) === String(slot.id)
             ).length
 
             return {
@@ -318,7 +322,7 @@ export function Dashboard() {
     ? experiments.find((e) => e.id === nextBooking.experiment_id)
     : null
 
-  // 実験応募確定処理（★ コイン加算を行わず完了通知のみ表示）
+  // 実験応募確定処理
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
 
@@ -336,8 +340,9 @@ export function Dashboard() {
           }
           let newSlots = Array.isArray(rawSlots) ? [...rawSlots] : []
           if (newSlots.length > 0) {
+            // ★ slot.id の一致する枠のみ bookedCount をインクリメント
             newSlots = newSlots.map((s: any) => {
-              if (s.id === slotId) {
+              if (String(s.id) === String(slotId)) {
                 const booked = Number(s.bookedCount ?? 0)
                 return { ...s, bookedCount: booked + 1 }
               }
@@ -356,7 +361,6 @@ export function Dashboard() {
       })
     )
 
-    // ★ コイン文言を外し、クリーンな参加確定メッセージを表示
     const message = isJa
       ? '参加予約が完了しました！マイページから予約内容を確認できます。'
       : 'Booking confirmed! Check details in your My Page.'
@@ -551,7 +555,6 @@ export function Dashboard() {
             </button>
           </div>
 
-          {/* ★ 学術・倫理に配慮した信頼性重視の案内バナー */}
           <div className="mt-2 pt-2 border-t flex flex-wrap items-center justify-between px-2 text-[11px] text-muted-foreground gap-1">
             <div className="flex items-center gap-2 text-foreground/80 font-medium">
               <ShieldCheck className="size-3.5 text-primary" />
@@ -655,6 +658,12 @@ export function Dashboard() {
       <MyBookingsDialog
         open={myBookingsOpen}
         onOpenChange={setMyBookingsOpen}
+        onOpenExperimentDetails={(expId) => {
+          const targetExp = experiments.find((e) => e.id === expId)
+          if (targetExp) {
+            openExperiment(targetExp)
+          }
+        }}
         onBookingCanceled={(_canceledExpId, _canceledSlotTime) => {
           fetchUserBookings()
           fetchExperiments()

@@ -32,7 +32,7 @@ interface CreateExperimentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess?: () => void
-  initialData?: any | null // ★ 編集時に渡される初期データ
+  initialData?: any | null
 }
 
 const REWARD_OPTIONS = [
@@ -65,13 +65,13 @@ export function CreateExperimentDialog({
   const [description, setDescription] = useState('')
   const [surveyUrl, setSurveyUrl] = useState('')
 
-  // 複数スロット参加の許可設定
+  // 複数参加・複数回回答の許可設定（対面・オンライン共通）
   const [allowMultipleSlots, setAllowMultipleSlots] = useState<boolean>(false)
 
-  // ★ 慶應認証バッジ限定フラグ
+  // 慶應認証バッジ限定フラグ
   const [requiresKeioBadge, setRequiresKeioBadge] = useState<boolean>(true)
 
-  // スロット設定
+  // スロット設定（対面実験用）
   const [slots, setSlots] = useState<{ id: string; time: string; capacity: number }[]>([
     { id: '1', time: '10/20 (火) 11:00-11:30', capacity: 3 },
     { id: '2', time: '10/20 (火) 13:00-13:30', capacity: 3 },
@@ -82,12 +82,10 @@ export function CreateExperimentDialog({
   const [totalSpots, setTotalSpots] = useState<number>(9)
   const [isTotalManuallyEdited, setIsTotalManuallyEdited] = useState(false)
 
-  // モーダルが開いたとき、または初期データが変わったときのフォーム初期化
   useEffect(() => {
     if (!open) return
 
     if (initialData) {
-      // 編集モード
       const isOnline = initialData.format === 'オンライン' || Boolean(initialData.survey_url)
       setMode(isOnline ? 'online' : 'in-person')
       setTitle(initialData.title || '')
@@ -138,7 +136,6 @@ export function CreateExperimentDialog({
       setTotalSpots(Number(initialData.spots_total || initialData.spotsTotal || 10))
       setIsTotalManuallyEdited(true)
     } else {
-      // 新規作成モード
       setMode('in-person')
       setTitle('')
       setLabName('')
@@ -161,7 +158,6 @@ export function CreateExperimentDialog({
     }
   }, [open, initialData])
 
-  // スロット変更時に自動計算
   useEffect(() => {
     if (mode === 'in-person' && !isTotalManuallyEdited) {
       const calculated = slots.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
@@ -214,6 +210,12 @@ export function CreateExperimentDialog({
       return
     }
 
+    // ★ オンラインアンケートの回答URL必須チェック
+    if (mode === 'online' && !surveyUrl.trim()) {
+      setErrorMsg('オンラインアンケートの回答URL（Google Forms等）を入力してください。')
+      return
+    }
+
     if (rewardType === 'その他' && !customRewardType.trim()) {
       setErrorMsg('謝礼種別で「その他」を選択した場合は、謝礼の詳細を入力してください。')
       return
@@ -236,7 +238,6 @@ export function CreateExperimentDialog({
         ? 0
         : parseInt(rewardAmount) || 0
 
-      // 既存スロットの予約済み数（bookedCount）を温存してマッピング
       const originalSlots: any[] = Array.isArray(initialData?.slots)
         ? initialData.slots
         : []
@@ -244,11 +245,9 @@ export function CreateExperimentDialog({
       const formattedSlots =
         mode === 'in-person'
           ? slots.map((s) => {
-              const prev = originalSlots.find(
-                (os) => String(os.id) === String(s.id) || os.time === s.time
-              )
+              const prev = originalSlots.find((os) => String(os.id) === String(s.id))
               return {
-                id: s.id,
+                id: String(s.id),
                 time: s.time,
                 capacity: Number(s.capacity),
                 bookedCount: Number(prev?.bookedCount || 0),
@@ -256,7 +255,6 @@ export function CreateExperimentDialog({
             })
           : []
 
-      // ★ updated_at は除外して安全に更新できるようにする
       const experimentPayload: any = {
         title: title.trim(),
         lab_name: labName.trim() || '研究室',
@@ -268,13 +266,12 @@ export function CreateExperimentDialog({
         description: description.trim(),
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
         spots_total: totalSpots,
-        allow_multiple_slots: mode === 'in-person' ? allowMultipleSlots : false,
+        allow_multiple_slots: allowMultipleSlots,
         requires_keio_badge: requiresKeioBadge,
         slots: formattedSlots,
       }
 
       if (isEditing) {
-        // ★ 編集（UPDATE）
         const { error } = await supabase
           .from('experiments')
           .update(experimentPayload)
@@ -282,7 +279,6 @@ export function CreateExperimentDialog({
 
         if (error) throw error
       } else {
-        // ★ 新規作成（INSERT）
         experimentPayload.spots_left = totalSpots
         experimentPayload.created_at = new Date().toISOString()
         if (user?.id) {
@@ -334,7 +330,7 @@ export function CreateExperimentDialog({
           <DialogDescription className="text-xs text-muted-foreground">
             {isEditing
               ? '募集内容や枠数、参加条件を更新します。'
-              : '対面実験またはオンラインアンケートの募集要項と参加スロット枠を設定します。'}
+              : '対面実験またはオンラインアンケートの募集要項と参加枠を設定します。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -403,12 +399,16 @@ export function CreateExperimentDialog({
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label className="text-muted-foreground font-medium">回答URL（Google Forms等）</Label>
+                <Label className="font-bold text-foreground flex items-center gap-1">
+                  <span>回答URL（Google Forms等）</span>
+                  <span className="text-rose-500">*</span>
+                </Label>
                 <Input
+                  required
                   placeholder="https://forms.gle/..."
                   value={surveyUrl}
                   onChange={(e) => setSurveyUrl(e.target.value)}
-                  className="text-xs"
+                  className="text-xs font-mono"
                 />
               </div>
             )}
@@ -472,7 +472,7 @@ export function CreateExperimentDialog({
             </div>
           )}
 
-          {/* ★ 慶應認証バッジ限定設定スイッチ */}
+          {/* 慶應認証バッジ限定設定スイッチ */}
           <div className="p-3.5 rounded-xl border bg-primary/5 border-primary/20 flex items-start justify-between gap-3 text-xs">
             <div className="space-y-0.5">
               <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -495,6 +495,34 @@ export function CreateExperimentDialog({
               {requiresKeioBadge ? '慶應限定: ON' : '全ユーザー許可'}
             </button>
           </div>
+
+          {/* オンラインアンケート用：複数回回答の許可設定スイッチ */}
+          {mode === 'online' && (
+            <div className="p-3.5 rounded-xl border bg-card flex items-start justify-between gap-3 text-xs">
+              <div className="space-y-0.5">
+                <p className="font-bold text-foreground flex items-center gap-1.5">
+                  <Layers className="size-3.5 text-primary" />
+                  <span>複数回の回答設定</span>
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {allowMultipleSlots
+                    ? '1人の被験者が複数回アンケートに回答・完了コードを提出できます（反復・定期調査向け）'
+                    : '1人の被験者は1回しか回答・提出できません（一般的な認知・心理・意識調査向け）'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAllowMultipleSlots((prev) => !prev)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                  allowMultipleSlots
+                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                }`}
+              >
+                {allowMultipleSlots ? '複数回答: 許可' : '1人1回限定'}
+              </button>
+            </div>
+          )}
 
           {/* 総募集人数の設定エリア */}
           <div className="p-3.5 rounded-xl border bg-muted/20 space-y-2 text-xs">
@@ -561,7 +589,7 @@ export function CreateExperimentDialog({
                 </Button>
               </div>
 
-              {/* 複数スロット参加の許可設定スイッチ */}
+              {/* 対面実験用：複数スロット参加の許可設定スイッチ */}
               <div className="p-3 rounded-xl border bg-card/60 flex items-start justify-between gap-3 text-xs">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
