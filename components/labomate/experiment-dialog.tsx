@@ -32,6 +32,7 @@ import {
 import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
+import { verifyAcademicEmail } from '@/lib/academic-auth'
 
 interface ExperimentDialogProps {
   experiment: Experiment | null
@@ -40,6 +41,8 @@ interface ExperimentDialogProps {
   bookedSlotId?: string
   onConfirm?: (experimentId: string, slotId: string) => void
 }
+
+const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
 export function ExperimentDialog({
   experiment,
@@ -63,6 +66,9 @@ export function ExperimentDialog({
   const [realNameEnglish, setRealNameEnglish] = useState('')
   const [hasExistingRealName, setHasExistingRealName] = useState(false)
   const [loadingProfile, setLoadingProfile] = useState(false)
+
+  // ★ 慶應認証ステート（マイページと100%同一基準）
+  const [isKeioVerified, setIsKeioVerified] = useState(false)
 
   // ユーザーのこの実験に対する既存予約を取得
   useEffect(() => {
@@ -93,32 +99,78 @@ export function ExperimentDialog({
     fetchCurrentBookings()
   }, [open, user, experiment])
 
-  // プロフィールから本名情報を取得
+  // プロフィールから本名情報 & 慶應認証バッジをマイページ（/profile）と完全一致で取得
   useEffect(() => {
     if (!open || !user) return
 
     const fetchUserProfile = async () => {
       setLoadingProfile(true)
       try {
-        const { data, error } = await supabase
-          .from('user_profiles')
-          .select('real_name_native, real_name_english, full_name')
-          .eq('id', user.id)
-          .single()
+        let nativeName = ''
+        let englishName = ''
+        let verified = false
 
-        if (!error && data) {
-          const native = data.real_name_native || ''
-          const english = data.real_name_english || ''
-          setRealNameNative(native)
-          setRealNameEnglish(english)
-          if (native.trim() && english.trim()) {
-            setHasExistingRealName(true)
-          } else {
-            setHasExistingRealName(false)
-          }
+        // 1. ログインメール自体のドメイン確認（最初から @keio.jp 等でログインした場合）
+        const emailCheck = verifyAcademicEmail(user.email)
+        if (emailCheck?.isVerified) {
+          verified = true
         }
+
+        // 2. マイページが保存している特定ユーザー専用のローカルキャッシュを確認
+        try {
+          const cachedVerified = localStorage.getItem(`academic_verified_${user.id}`)
+          if (cachedVerified) {
+            const parsed = JSON.parse(cachedVerified)
+            if (parsed && parsed.isVerified) {
+              verified = true
+            }
+          }
+        } catch (e) {
+          console.error(e)
+        }
+
+        // 3. ローカルに保存された本名基本情報の読み込み
+        try {
+          const cachedProfile = localStorage.getItem(PROFILE_STORAGE_KEY)
+          if (cachedProfile) {
+            const parsed = JSON.parse(cachedProfile)
+            if (parsed.realNameNative) nativeName = parsed.realNameNative
+            if (parsed.realNameEnglish) englishName = parsed.realNameEnglish
+          }
+        } catch (e) {}
+
+        // 4. Supabase DB (user_profiles) から確認
+        try {
+          const { data, error } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single()
+
+          if (!error && data) {
+            if (data.real_name_native) nativeName = data.real_name_native
+            if (data.real_name_english) englishName = data.real_name_english
+
+            if (data.is_academic_verified) {
+              verified = true
+            } else if (data.is_academic_verified === false && !emailCheck?.isVerified) {
+              verified = false
+            }
+          }
+        } catch (dbErr) {
+          console.error('Failed to load user_profiles:', dbErr)
+        }
+
+        setRealNameNative(nativeName)
+        setRealNameEnglish(englishName)
+        if (nativeName.trim() && englishName.trim()) {
+          setHasExistingRealName(true)
+        } else {
+          setHasExistingRealName(false)
+        }
+        setIsKeioVerified(verified)
       } catch (err) {
-        console.error('Failed to fetch user profile:', err)
+        console.error('Failed to load profile details in dialog:', err)
       } finally {
         setLoadingProfile(false)
       }
@@ -143,12 +195,21 @@ export function ExperimentDialog({
   const hasAnyBookingForThisExp = userBookedSlots.length > 0
   const isBlockedBySingleSlotRule = !allowMultipleSlots && hasAnyBookingForThisExp
 
+  // ★ 慶應認証バッジ限定判定（プロフィール取得中完了後に判定）
+  const requiresKeioBadge = Boolean(expAny.requires_keio_badge || expAny.requiresKeioBadge)
+  const isBlockedByKeioRule = !loadingProfile && requiresKeioBadge && !isKeioVerified
+
   // 応募実行（枠数とスロットの確実な減算同期）
   const handleApply = async () => {
     setErrorMessage(null)
 
     if (!user) {
       setErrorMessage('応募するにはログインが必要です。')
+      return
+    }
+
+    if (isBlockedByKeioRule) {
+      setErrorMessage('この実験は慶應認証バッジ保有者限定です。マイページから大学メール認証を完了してください。')
       return
     }
 
@@ -174,14 +235,16 @@ export function ExperimentDialog({
     try {
       // 1. プロフィール側に本名が未保存だった場合は自動更新
       if (!hasExistingRealName) {
-        await supabase
-          .from('user_profiles')
-          .update({
-            real_name_native: cleanNative,
-            real_name_english: cleanEnglish,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id)
+        try {
+          await supabase
+            .from('user_profiles')
+            .update({
+              real_name_native: cleanNative,
+              real_name_english: cleanEnglish,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id)
+        } catch (e) {}
       }
 
       // 2. applications テーブルに新規応募を記録
@@ -218,7 +281,7 @@ export function ExperimentDialog({
         }
       }
 
-      // 3. ★ DBから最新レコードを取得して確実に枠数を減算更新（RPC不使用で安定実行）
+      // 3. DBから最新レコードを取得して枠数を減算更新
       try {
         const { data: currentDbExp, error: fetchErr } = await supabase
           .from('experiments')
@@ -247,20 +310,13 @@ export function ExperimentDialog({
             })
           }
 
-          const { error: updateErr } = await supabase
+          await supabase
             .from('experiments')
             .update({
               spots_left: nextSpotsLeft,
               slots: updatedSlots,
-              updated_at: new Date().toISOString(),
             })
             .eq('id', experiment.id)
-
-          if (updateErr) {
-            console.warn('Update error:', updateErr.message)
-          } else {
-            console.log('Successfully decremented spot! Remaining:', nextSpotsLeft)
-          }
         }
       } catch (slotUpdateErr) {
         console.warn('DB update catch:', slotUpdateErr)
@@ -340,6 +396,11 @@ export function ExperimentDialog({
                 </span>
               )}
             </Badge>
+            {requiresKeioBadge && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20 flex items-center gap-1">
+                <ShieldCheck className="size-3" /> 慶應生限定
+              </Badge>
+            )}
             <span className="text-xs text-muted-foreground font-medium">
               {expAny.labName || expAny.lab_name || expAny.organizer || '研究室'}
             </span>
@@ -416,6 +477,24 @@ export function ExperimentDialog({
               </div>
             </div>
 
+            {/* ★ 慶應生限定バナー */}
+            {requiresKeioBadge && (
+              <div
+                className={`p-3 rounded-xl border text-xs flex items-center gap-2.5 ${
+                  isBlockedByKeioRule
+                    ? 'bg-destructive/10 border-destructive/30 text-destructive'
+                    : 'bg-primary/10 border-primary/25 text-primary'
+                }`}
+              >
+                <ShieldCheck className="size-4 shrink-0" />
+                <span className="leading-relaxed">
+                  {isBlockedByKeioRule
+                    ? 'この実験は「慶應認証バッジ保有者限定」です。マイページで @keio.jp メールを認証すると参加できるようになります。'
+                    : '慶應義塾大学 認証バッジが適用されています（参加資格確認済み）。'}
+                </span>
+              </div>
+            )}
+
             {/* 1人1スロット限定時の案内 */}
             {isBlockedBySingleSlotRule && (
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 text-xs flex items-center gap-2">
@@ -456,7 +535,8 @@ export function ExperimentDialog({
                     )
 
                     const isSelected = selectedSlotId === slot.id
-                    const isDisabled = isFull || isAlreadyBookedByMe || isBlockedBySingleSlotRule
+                    const isDisabled =
+                      isFull || isAlreadyBookedByMe || isBlockedBySingleSlotRule || isBlockedByKeioRule
 
                     return (
                       <button
@@ -573,7 +653,9 @@ export function ExperimentDialog({
                 size="sm"
                 disabled={
                   loading ||
+                  loadingProfile ||
                   isBlockedBySingleSlotRule ||
+                  isBlockedByKeioRule ||
                   !realNameNative.trim() ||
                   !realNameEnglish.trim() ||
                   (Boolean(experiment.slots?.length) && !selectedSlotId)
@@ -583,7 +665,11 @@ export function ExperimentDialog({
               >
                 {loading ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
                 <span>
-                  {isBlockedBySingleSlotRule ? '応募上限に達しています' : '応募を確定する'}
+                  {isBlockedByKeioRule
+                    ? '慶應認証バッジが必要です'
+                    : isBlockedBySingleSlotRule
+                    ? '応募上限に達しています'
+                    : '応募を確定する'}
                 </span>
               </Button>
             </div>

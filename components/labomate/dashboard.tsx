@@ -231,6 +231,9 @@ export function Dashboard() {
             spots_total: Math.max(1, spotsTotalVal),
             allowMultipleSlots: Boolean(item.allow_multiple_slots),
             allow_multiple_slots: Boolean(item.allow_multiple_slots),
+            // ★ 慶應認証バッジ限定フラグを確実に渡す
+            requires_keio_badge: Boolean(item.requires_keio_badge),
+            requiresKeioBadge: Boolean(item.requires_keio_badge),
             requirements: Array.isArray(item.requirements)
               ? item.requirements
               : item.requirements
@@ -289,7 +292,7 @@ export function Dashboard() {
     }
   }, [experiments])
 
-  // フィルタリング処理（算出済みの spotsLeft / spotsTotal をそのまま表示）
+  // フィルタリング処理
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return experiments.filter((exp) => {
@@ -330,7 +333,7 @@ export function Dashboard() {
     // 1. 予約マップを即時更新
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
 
-    // 2. 実験カードの枠数を即座に画面反映（見かけ上の即時レスポンス）
+    // 2. 実験カードの枠数を即座に画面反映
     setExperiments((prev) =>
       prev.map((exp) => {
         if (exp.id === experimentId) {
@@ -378,7 +381,7 @@ export function Dashboard() {
       setToastMessage(null)
     }, 4000)
 
-    // 4. DBの実データと完全再同期（applicationsの実件数を取得して確定）
+    // 4. DBの実データと完全再同期
     setTimeout(() => {
       fetchUserBookings()
       fetchExperiments()
@@ -397,7 +400,7 @@ export function Dashboard() {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
-        {/* 最上部：被験者アクティブ・ダッシュボード（直近の参加予定） */}
+        {/* 最上部：被験者アクティブ・ダッシュボード */}
         {nextBooking ? (
           <section
             aria-label="Your Next Session"

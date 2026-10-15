@@ -9,6 +9,7 @@ import {
   Clock,
   CheckCircle2,
   Flame,
+  ShieldCheck,
 } from 'lucide-react'
 import { Experiment, formatYen } from '@/lib/experiments'
 import { useLanguage } from '@/lib/language-context'
@@ -30,11 +31,14 @@ export function ExperimentCard({
   const expAny = experiment as any
   const isOnline = experiment.mode === 'online' || experiment.location?.includes('オンライン')
 
-  // ★ 総定員と残り枠数の取得（スネークケース・キャメルケース両対応）
+  // ★ 慶應生限定フラグ判定
+  const requiresKeioBadge = Boolean(expAny.requires_keio_badge || expAny.requiresKeioBadge)
+
+  // 総定員と残り枠数
   const total = Number(expAny.spotsTotal ?? expAny.spots_total ?? 10)
   const left = Number(expAny.spotsLeft ?? expAny.spots_left ?? total)
 
-  // ★ 集まった人数 = 定員 - 残り枠数
+  // 集まった人数 = 定員 - 残り枠数
   const filled = Math.max(0, total - left)
   const percent = total > 0 ? Math.min(100, Math.round((filled / total) * 100)) : 0
 
@@ -43,21 +47,34 @@ export function ExperimentCard({
   return (
     <div className="rounded-2xl border bg-card p-4 sm:p-5 flex flex-col justify-between hover:border-foreground/30 transition-all shadow-xs relative group">
       <div className="space-y-3">
-        {/* カード上部バッジ */}
-        <div className="flex items-center justify-between gap-2">
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-            {isOnline ? (
-              <span className="flex items-center gap-1">
-                <Globe2 className="size-3" /> オンライン調査
-              </span>
-            ) : (
-              <span className="flex items-center gap-1">
-                <Building2 className="size-3" /> 学内対面
-              </span>
-            )}
-          </Badge>
-
+        {/* カード上部バッジ群 */}
+        <div className="flex items-center justify-between gap-1.5 flex-wrap">
           <div className="flex items-center gap-1.5">
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              {isOnline ? (
+                <span className="flex items-center gap-1">
+                  <Globe2 className="size-3" /> オンライン調査
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <Building2 className="size-3" /> 学内対面
+                </span>
+              )}
+            </Badge>
+
+            {/* ★ 慶應生限定バナー */}
+            {requiresKeioBadge && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] px-1.5 py-0 bg-primary/10 text-primary border-primary/25 font-bold flex items-center gap-1"
+              >
+                <ShieldCheck className="size-3" />
+                <span>慶應生限定</span>
+              </Badge>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
             {isUrgent && (
               <Badge className="bg-rose-500/10 text-rose-500 border border-rose-500/20 text-[10px] px-1.5 py-0 font-bold flex items-center gap-0.5">
                 <Flame className="size-3" />
@@ -92,7 +109,7 @@ export function ExperimentCard({
           </div>
         </div>
 
-        {/* ★ 集まり状況プログレスバー（確実に filled / total を表示） */}
+        {/* 集まり状況プログレスバー */}
         <div className="space-y-1.5 pt-1">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-muted-foreground">集まり状況</span>

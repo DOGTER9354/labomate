@@ -14,6 +14,8 @@ import {
   Trash2,
   AlertTriangle,
   LogIn,
+  Edit,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +24,7 @@ import { supabase } from '@/lib/supabase'
 import { CreateExperimentDialog } from '@/components/labomate/create-experiment-dialog'
 import { useAuth } from '@/lib/auth-context'
 import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
+import { RosterDialog } from '@/components/labomate/roster-dialog'
 
 export default function ManagePage() {
   const { language } = useLanguage()
@@ -29,6 +32,7 @@ export default function ManagePage() {
   const { user, loading: authLoading } = useAuth()
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [editingExp, setEditingExp] = useState<any | null>(null)
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
   const [myExperiments, setMyExperiments] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -38,16 +42,27 @@ export default function ManagePage() {
   const [deletingTitle, setDeletingTitle] = useState<string>('')
   const [isDeleting, setIsDeleting] = useState(false)
 
+  // 名簿確認ダイアログ用ステート
+  const [rosterExp, setRosterExp] = useState<any | null>(null)
+  const [rosterOpen, setRosterOpen] = useState(false)
+
   // 募集作成ボタン押下時のガード処理
   const handleOpenCreateModal = () => {
     if (!user) {
       setAuthGuardOpen(true)
       return
     }
+    setEditingExp(null) // 新規モード
     setCreateDialogOpen(true)
   }
 
-  // ログイン中のユーザーが作成した募集実験一覧を取得（端末ローカルではなくDB基準）
+  // ★ 編集ボタン押下時
+  const handleOpenEditModal = (exp: any) => {
+    setEditingExp(exp) // 編集モード
+    setCreateDialogOpen(true)
+  }
+
+  // ログイン中のユーザーが作成した募集実験一覧を取得（DB基準）
   const fetchMyExperiments = useCallback(async () => {
     if (!user) {
       setMyExperiments([])
@@ -83,30 +98,25 @@ export default function ManagePage() {
     }
   }, [authLoading, fetchMyExperiments])
 
-  // 削除・取り下げ実行処理（DBから完全削除）
+  // 削除・取り下げ実行処理
   const handleConfirmDelete = async () => {
     if (!deletingId || !user) return
     setIsDeleting(true)
 
     try {
-      // 1. Supabase の experiments テーブルから削除（作成者本人のIDであることも担保）
       const { error: dbError } = await supabase
         .from('experiments')
         .delete()
         .eq('id', deletingId)
         .eq('created_by', user.id)
 
-      if (dbError) {
-        throw dbError
-      }
+      if (dbError) throw dbError
 
-      // 2. 関連する応募記録（applications）を中止扱いに更新
       await supabase
         .from('applications')
         .update({ status: '中止・募集終了' })
         .eq('experiment_id', deletingId)
 
-      // 3. UIリストから即座に除外
       setMyExperiments((prev) => prev.filter((exp) => exp.id !== deletingId))
       setDeletingId(null)
     } catch (err: any) {
@@ -115,6 +125,11 @@ export default function ManagePage() {
     } finally {
       setIsDeleting(false)
     }
+  }
+
+  const handleOpenRoster = (exp: any) => {
+    setRosterExp(exp)
+    setRosterOpen(true)
   }
 
   return (
@@ -155,8 +170,8 @@ export default function ManagePage() {
             </div>
             <p className="text-xs text-muted-foreground">
               {isJa
-                ? 'あなたが企画した実験の募集状況確認、被験者名簿の確認、新規募集や取り下げがここで行えます。'
-                : 'Manage active studies, view applicants, and launch or withdraw recruitments.'}
+                ? 'あなたが企画した実験の募集状況確認、被験者名簿の確認、新規募集や編集・取り下げがここで行えます。'
+                : 'Manage active studies, view applicants, edit details, and launch or withdraw recruitments.'}
             </p>
           </div>
 
@@ -186,7 +201,6 @@ export default function ManagePage() {
               <span>{isJa ? '読み込み中...' : 'Loading...'}</span>
             </div>
           ) : !user ? (
-            /* 未ログイン時の表示 */
             <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary mx-auto">
                 <LogIn className="size-5" />
@@ -207,7 +221,6 @@ export default function ManagePage() {
               </Link>
             </div>
           ) : myExperiments.length === 0 ? (
-            /* ログイン済みで作成実験が0件の場合 */
             <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-2">
               <p className="text-xs font-bold text-foreground">
                 {isJa ? '現在募集中の実験はありません' : 'No active recruitments'}
@@ -245,6 +258,11 @@ export default function ManagePage() {
                           </span>
                         )}
                       </Badge>
+                      {exp.requires_keio_badge && (
+                        <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20 flex items-center gap-0.5">
+                          <ShieldCheck className="size-2.5" /> 慶應生限定
+                        </Badge>
+                      )}
                       <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
                         募集中
                       </span>
@@ -271,6 +289,7 @@ export default function ManagePage() {
 
                   {/* アクション群 */}
                   <div className="flex items-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0">
+                    {/* 削除（ゴミ箱） */}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -284,8 +303,22 @@ export default function ManagePage() {
                       <Trash2 className="size-3.5" />
                     </Button>
 
+                    {/* ★ 編集ボタン（ゴミ箱の隣） */}
                     <Button
                       size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenEditModal(exp)}
+                      className="h-8 text-xs font-semibold gap-1"
+                      title={isJa ? '募集内容を編集' : 'Edit Study'}
+                    >
+                      <Edit className="size-3.5" />
+                      <span>{isJa ? '編集' : 'Edit'}</span>
+                    </Button>
+
+                    {/* 名簿・枠確認ボタン */}
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenRoster(exp)}
                       className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground"
                     >
                       <span>{isJa ? '名簿・枠確認' : 'Manage'}</span>
@@ -298,6 +331,13 @@ export default function ManagePage() {
           )}
         </section>
       </main>
+
+      {/* 名簿・枠確認ダイアログ */}
+      <RosterDialog
+        experiment={rosterExp}
+        open={rosterOpen}
+        onOpenChange={setRosterOpen}
+      />
 
       {/* 募集削除・取り下げ確認モーダル */}
       {deletingId && (
@@ -345,10 +385,14 @@ export default function ManagePage() {
         </div>
       )}
 
-      {/* 新規募集作成モーダル */}
+      {/* 新規募集作成 / 編集モーダル */}
       <CreateExperimentDialog
         open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
+        onOpenChange={(open) => {
+          setCreateDialogOpen(open)
+          if (!open) setEditingExp(null)
+        }}
+        initialData={editingExp}
         onSuccess={() => {
           fetchMyExperiments()
         }}

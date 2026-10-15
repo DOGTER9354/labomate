@@ -21,8 +21,9 @@ import {
   Loader2,
   Sparkles,
   Users,
-  CheckSquare2,
   Layers,
+  ShieldCheck,
+  Edit3,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -31,6 +32,7 @@ interface CreateExperimentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess?: () => void
+  initialData?: any | null // ★ 編集時に渡される初期データ
 }
 
 const REWARD_OPTIONS = [
@@ -44,8 +46,11 @@ export function CreateExperimentDialog({
   open,
   onOpenChange,
   onSuccess,
+  initialData = null,
 }: CreateExperimentDialogProps) {
   const { user } = useAuth()
+  const isEditing = Boolean(initialData?.id)
+
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -60,21 +65,103 @@ export function CreateExperimentDialog({
   const [description, setDescription] = useState('')
   const [surveyUrl, setSurveyUrl] = useState('')
 
-  // 複数スロット参加の許可設定（デフォルト: false = 1人1スロット限定）
+  // 複数スロット参加の許可設定
   const [allowMultipleSlots, setAllowMultipleSlots] = useState<boolean>(false)
 
-  // スロット設定（対面実験用）
+  // ★ 慶應認証バッジ限定フラグ
+  const [requiresKeioBadge, setRequiresKeioBadge] = useState<boolean>(true)
+
+  // スロット設定
   const [slots, setSlots] = useState<{ id: string; time: string; capacity: number }[]>([
     { id: '1', time: '10/20 (火) 11:00-11:30', capacity: 3 },
     { id: '2', time: '10/20 (火) 13:00-13:30', capacity: 3 },
     { id: '3', time: '10/21 (水) 13:00-13:30', capacity: 3 },
   ])
 
-  // 総募集人数ステート（手動編集可能）
+  // 総募集人数ステート
   const [totalSpots, setTotalSpots] = useState<number>(9)
   const [isTotalManuallyEdited, setIsTotalManuallyEdited] = useState(false)
 
-  // スロット変更時に自動計算（手動編集されていない場合のみ自動連動）
+  // モーダルが開いたとき、または初期データが変わったときのフォーム初期化
+  useEffect(() => {
+    if (!open) return
+
+    if (initialData) {
+      // 編集モード
+      const isOnline = initialData.format === 'オンライン' || Boolean(initialData.survey_url)
+      setMode(isOnline ? 'online' : 'in-person')
+      setTitle(initialData.title || '')
+      setLabName(initialData.lab_name || initialData.labName || '')
+      setLocation(initialData.location || (isOnline ? 'オンライン（Webアンケート）' : 'SFC オミクロン館'))
+      setDurationMins(String(initialData.duration_mins || 30))
+
+      const rType = initialData.reward_type || 'Amazonギフト券'
+      if (REWARD_OPTIONS.includes(rType)) {
+        setRewardType(rType)
+        setCustomRewardType('')
+      } else {
+        setRewardType('その他')
+        setCustomRewardType(rType)
+      }
+
+      setRewardAmount(String(initialData.reward_amount ?? '1000'))
+      setDescription(initialData.description || '')
+      setSurveyUrl(initialData.survey_url || '')
+      setAllowMultipleSlots(Boolean(initialData.allow_multiple_slots))
+      setRequiresKeioBadge(
+        initialData.requires_keio_badge !== undefined
+          ? Boolean(initialData.requires_keio_badge)
+          : true
+      )
+
+      let parsedSlots: any[] = []
+      if (Array.isArray(initialData.slots)) {
+        parsedSlots = initialData.slots
+      } else if (typeof initialData.slots === 'string') {
+        try {
+          parsedSlots = JSON.parse(initialData.slots)
+        } catch (e) {
+          parsedSlots = []
+        }
+      }
+
+      if (parsedSlots.length > 0) {
+        setSlots(
+          parsedSlots.map((s, idx) => ({
+            id: String(s.id || idx + 1),
+            time: s.time || '',
+            capacity: Number(s.capacity || 1),
+          }))
+        )
+      }
+
+      setTotalSpots(Number(initialData.spots_total || initialData.spotsTotal || 10))
+      setIsTotalManuallyEdited(true)
+    } else {
+      // 新規作成モード
+      setMode('in-person')
+      setTitle('')
+      setLabName('')
+      setLocation('SFC オミクロン館')
+      setDurationMins('30')
+      setRewardType('Amazonギフト券')
+      setCustomRewardType('')
+      setRewardAmount('1000')
+      setDescription('')
+      setSurveyUrl('')
+      setAllowMultipleSlots(false)
+      setRequiresKeioBadge(true)
+      setSlots([
+        { id: '1', time: '10/20 (火) 11:00-11:30', capacity: 3 },
+        { id: '2', time: '10/20 (火) 13:00-13:30', capacity: 3 },
+        { id: '3', time: '10/21 (水) 13:00-13:30', capacity: 3 },
+      ])
+      setTotalSpots(9)
+      setIsTotalManuallyEdited(false)
+    }
+  }, [open, initialData])
+
+  // スロット変更時に自動計算
   useEffect(() => {
     if (mode === 'in-person' && !isTotalManuallyEdited) {
       const calculated = slots.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
@@ -149,7 +236,28 @@ export function CreateExperimentDialog({
         ? 0
         : parseInt(rewardAmount) || 0
 
-      const newExperimentPayload: any = {
+      // 既存スロットの予約済み数（bookedCount）を温存してマッピング
+      const originalSlots: any[] = Array.isArray(initialData?.slots)
+        ? initialData.slots
+        : []
+
+      const formattedSlots =
+        mode === 'in-person'
+          ? slots.map((s) => {
+              const prev = originalSlots.find(
+                (os) => String(os.id) === String(s.id) || os.time === s.time
+              )
+              return {
+                id: s.id,
+                time: s.time,
+                capacity: Number(s.capacity),
+                bookedCount: Number(prev?.bookedCount || 0),
+              }
+            })
+          : []
+
+      // ★ updated_at は除外して安全に更新できるようにする
+      const experimentPayload: any = {
         title: title.trim(),
         lab_name: labName.trim() || '研究室',
         format: mode === 'online' ? 'オンライン' : '学内対面',
@@ -160,37 +268,41 @@ export function CreateExperimentDialog({
         description: description.trim(),
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
         spots_total: totalSpots,
-        spots_left: totalSpots,
         allow_multiple_slots: mode === 'in-person' ? allowMultipleSlots : false,
-        slots:
-          mode === 'in-person'
-            ? slots.map((s) => ({
-                id: s.id,
-                time: s.time,
-                capacity: Number(s.capacity),
-                bookedCount: 0,
-              }))
-            : [],
-        created_at: new Date().toISOString(),
+        requires_keio_badge: requiresKeioBadge,
+        slots: formattedSlots,
       }
 
-      if (user?.id) {
-        newExperimentPayload.created_by = user.id
-      }
+      if (isEditing) {
+        // ★ 編集（UPDATE）
+        const { error } = await supabase
+          .from('experiments')
+          .update(experimentPayload)
+          .eq('id', initialData.id)
 
-      const { error } = await supabase
-        .from('experiments')
-        .insert(newExperimentPayload)
+        if (error) throw error
+      } else {
+        // ★ 新規作成（INSERT）
+        experimentPayload.spots_left = totalSpots
+        experimentPayload.created_at = new Date().toISOString()
+        if (user?.id) {
+          experimentPayload.created_by = user.id
+        }
 
-      if (error) {
-        if (error.message?.includes('created_by')) {
-          delete newExperimentPayload.created_by
-          const { error: retryError } = await supabase
-            .from('experiments')
-            .insert(newExperimentPayload)
-          if (retryError) throw retryError
-        } else {
-          throw error
+        const { error } = await supabase
+          .from('experiments')
+          .insert(experimentPayload)
+
+        if (error) {
+          if (error.message?.includes('created_by')) {
+            delete experimentPayload.created_by
+            const { error: retryError } = await supabase
+              .from('experiments')
+              .insert(experimentPayload)
+            if (retryError) throw retryError
+          } else {
+            throw error
+          }
         }
       }
 
@@ -199,14 +311,9 @@ export function CreateExperimentDialog({
       }
 
       onOpenChange(false)
-      setTitle('')
-      setDescription('')
-      setCustomRewardType('')
-      setIsTotalManuallyEdited(false)
-      setAllowMultipleSlots(false)
     } catch (err: any) {
-      console.error('Create experiment error:', err)
-      setErrorMsg(err.message || '募集の作成に失敗しました。')
+      console.error('Save experiment error:', err)
+      setErrorMsg(err.message || '募集の保存に失敗しました。')
     } finally {
       setLoading(false)
     }
@@ -218,14 +325,16 @@ export function CreateExperimentDialog({
         <DialogHeader className="space-y-1.5">
           <div className="flex items-center gap-2">
             <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Sparkles className="size-4" />
+              {isEditing ? <Edit3 className="size-4" /> : <Sparkles className="size-4" />}
             </span>
             <DialogTitle className="text-base font-bold text-foreground">
-              新規の被験者募集を作成
+              {isEditing ? '実験募集を編集' : '新規の被験者募集を作成'}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
-            対面実験またはオンラインアンケートの募集要項と参加スロット枠を設定します。
+            {isEditing
+              ? '募集内容や枠数、参加条件を更新します。'
+              : '対面実験またはオンラインアンケートの募集要項と参加スロット枠を設定します。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -363,6 +472,30 @@ export function CreateExperimentDialog({
             </div>
           )}
 
+          {/* ★ 慶應認証バッジ限定設定スイッチ */}
+          <div className="p-3.5 rounded-xl border bg-primary/5 border-primary/20 flex items-start justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <p className="font-bold text-foreground flex items-center gap-1.5">
+                <ShieldCheck className="size-4 text-primary" />
+                <span>慶應認証バッジ保有者のみ参加可能</span>
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                ONにすると、慶應メール（@keio.jp）で認証済みの学生のみが応募できるよう制限されます（推奨）。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRequiresKeioBadge((prev) => !prev)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                requiresKeioBadge
+                  ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                  : 'bg-muted/60 text-muted-foreground border-border hover:bg-muted'
+              }`}
+            >
+              {requiresKeioBadge ? '慶應限定: ON' : '全ユーザー許可'}
+            </button>
+          </div>
+
           {/* 総募集人数の設定エリア */}
           <div className="p-3.5 rounded-xl border bg-muted/20 space-y-2 text-xs">
             <div className="flex items-center justify-between">
@@ -428,7 +561,7 @@ export function CreateExperimentDialog({
                 </Button>
               </div>
 
-              {/* ★ 複数スロット参加の許可設定スイッチ */}
+              {/* 複数スロット参加の許可設定スイッチ */}
               <div className="p-3 rounded-xl border bg-card/60 flex items-start justify-between gap-3 text-xs">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -517,7 +650,7 @@ export function CreateExperimentDialog({
               className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-28"
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}
-              <span>募集を公開する（計{totalSpots}名）</span>
+              <span>{isEditing ? '更新を保存する' : `募集を公開する（計${totalSpots}名）`}</span>
             </Button>
           </div>
         </form>
