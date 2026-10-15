@@ -108,7 +108,7 @@ export function KeioGuardDialog({
         throw new Error(data.error || '認証に失敗しました。')
       }
 
-      // 2. ★ ログイン中のブラウザクライアントから直接 user_profiles を upsert
+      // 2. ログイン中のクライアントから user_profiles を upsert
       const { error: dbError } = await supabase
         .from('user_profiles')
         .upsert({
@@ -185,7 +185,7 @@ export function KeioGuardDialog({
                 <Badge variant="secondary" className="text-[10px] px-1.5 py-0">Keio / Academic</Badge>
               </span>
               <p className="text-[11px] text-muted-foreground">
-                慶應義塾大学（<code>@keio.jp</code>）および各大学ドメイン（<code>@*.ac.jp</code>）
+                慶應義塾大学（<code>@keio.jp</code> / <code>@sfc.keio.ac.jp</code>）および各大学ドメイン（<code>@*.ac.jp</code>）
               </p>
             </div>
 
@@ -239,6 +239,9 @@ export function KeioGuardDialog({
               </p>
               <p className="text-[11px] text-muted-foreground">
                 上記アドレスに届いた 6 桁の認証コードを入力してください（有効期限: 15分）。
+              </p>
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium pt-0.5">
+                ※ 数分経っても届かない場合は「迷惑メールフォルダ」をご確認ください。
               </p>
             </div>
 

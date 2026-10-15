@@ -1,49 +1,42 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 
 export async function POST(request: Request) {
   try {
     const { code, userId } = await request.json()
 
     if (!code || !userId) {
-      return NextResponse.json({ error: '認証コードまたはユーザーIDが不足しています。' }, { status: 400 })
+      return NextResponse.json({ error: '認証コードとユーザーIDが必要です。' }, { status: 400 })
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-
-    // 1. コード照合
-    const { data: records, error: fetchError } = await supabase
-      .from('academic_verifications')
+    // DB から最新のコードレコードを検索
+    const { data, error } = await supabase
+      .from('academic_verification_codes')
       .select('*')
       .eq('user_id', userId)
-      .eq('code', code.trim())
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
+      .eq('code', String(code).trim())
+      .single()
 
-    if (fetchError || !records || records.length === 0) {
+    if (error || !data) {
       return NextResponse.json({ error: '認証コードが正しくないか、有効期限が切れています。' }, { status: 400 })
     }
 
-    const verification = records[0]
+    // 有効期限の確認
+    const isExpired = new Date(data.expires_at).getTime() < Date.now()
+    if (isExpired) {
+      return NextResponse.json({ error: '認証コードの有効期限（15分）が切れています。再送信してください。' }, { status: 400 })
+    }
 
-    // 2. 使用済みコードを削除
-    await supabase
-      .from('academic_verifications')
-      .delete()
-      .eq('user_id', userId)
+    // 認証成功時、使用済みコードを削除
+    await supabase.from('academic_verification_codes').delete().eq('id', data.id)
 
-    // 検証成功！大学メールと大学名を返す
     return NextResponse.json({
       success: true,
-      academicEmail: verification.academic_email,
-      institutionName: verification.institution_name,
+      academicEmail: data.email,
+      institutionName: data.institution_name,
     })
-  } catch (err: any) {
-    console.error('verify-code error:', err)
-    return NextResponse.json({ error: err.message || '認証の検証に失敗しました。' }, { status: 500 })
+  } catch (error: any) {
+    console.error('verify-code error:', error)
+    return NextResponse.json({ error: error.message || '検証中にエラーが発生しました。' }, { status: 500 })
   }
 }
