@@ -13,22 +13,20 @@ import {
   ArrowLeft,
   Trash2,
   AlertTriangle,
+  LogIn,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '@/lib/language-context'
 import { supabase } from '@/lib/supabase'
 import { CreateExperimentDialog } from '@/components/labomate/create-experiment-dialog'
-import { EXPERIMENTS } from '@/lib/experiments'
 import { useAuth } from '@/lib/auth-context'
 import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
-
-const DELETED_EXP_STORAGE_KEY = 'labomate_deleted_experiments'
 
 export default function ManagePage() {
   const { language } = useLanguage()
   const isJa = language === 'ja'
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
@@ -49,73 +47,66 @@ export default function ManagePage() {
     setCreateDialogOpen(true)
   }
 
-  // 募集実験一覧を取得（取り下げ済みIDを除外）
-  const fetchExperiments = useCallback(async () => {
-    setLoading(true)
+  // ログイン中のユーザーが作成した募集実験一覧を取得（端末ローカルではなくDB基準）
+  const fetchMyExperiments = useCallback(async () => {
+    if (!user) {
+      setMyExperiments([])
+      return
+    }
 
-    // 削除済みIDリストを取得
-    let deletedIds: string[] = []
-    try {
-      const cached = localStorage.getItem(DELETED_EXP_STORAGE_KEY)
-      if (cached) deletedIds = JSON.parse(cached)
-    } catch (e) {}
+    setLoading(true)
 
     try {
       const { data, error } = await supabase
         .from('experiments')
         .select('*')
+        .eq('created_by', user.id)
         .order('created_at', { ascending: false })
 
-      if (!error && data && data.length > 0) {
-        setMyExperiments(data.filter((item) => !deletedIds.includes(item.id)))
+      if (error) {
+        console.error('Fetch my experiments error:', error)
+        setMyExperiments([])
       } else {
-        setMyExperiments(EXPERIMENTS.slice(0, 3).filter((item) => !deletedIds.includes(item.id)))
+        setMyExperiments(data || [])
       }
     } catch (e) {
-      console.error(e)
-      setMyExperiments(EXPERIMENTS.slice(0, 3).filter((item) => !deletedIds.includes(item.id)))
+      console.error('Error fetching experiments:', e)
+      setMyExperiments([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
-    fetchExperiments()
-  }, [fetchExperiments])
+    if (!authLoading) {
+      fetchMyExperiments()
+    }
+  }, [authLoading, fetchMyExperiments])
 
-  // 削除・取り下げ実行処理
+  // 削除・取り下げ実行処理（DBから完全削除）
   const handleConfirmDelete = async () => {
-    if (!deletingId) return
+    if (!deletingId || !user) return
     setIsDeleting(true)
 
     try {
-      // 1. Supabase の experiments テーブルから削除
+      // 1. Supabase の experiments テーブルから削除（作成者本人のIDであることも担保）
       const { error: dbError } = await supabase
         .from('experiments')
         .delete()
         .eq('id', deletingId)
+        .eq('created_by', user.id)
 
       if (dbError) {
-        console.warn('DB delete warning:', dbError)
+        throw dbError
       }
 
-      // 2. 関連する応募記録（applications）も取り消し
+      // 2. 関連する応募記録（applications）を中止扱いに更新
       await supabase
         .from('applications')
         .update({ status: '中止・募集終了' })
         .eq('experiment_id', deletingId)
 
-      // 3. ローカルの削除済みリストに登録（サンプルデータの即時非表示対応）
-      try {
-        const cached = localStorage.getItem(DELETED_EXP_STORAGE_KEY)
-        const current = cached ? JSON.parse(cached) : []
-        localStorage.setItem(
-          DELETED_EXP_STORAGE_KEY,
-          JSON.stringify([...current, deletingId])
-        )
-      } catch (e) {}
-
-      // 4. UIリストから即座に除外
+      // 3. UIリストから即座に除外
       setMyExperiments((prev) => prev.filter((exp) => exp.id !== deletingId))
       setDeletingId(null)
     } catch (err: any) {
@@ -189,12 +180,34 @@ export default function ManagePage() {
             </h2>
           </div>
 
-          {loading ? (
+          {authLoading || loading ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground text-xs gap-2">
               <Loader2 className="size-4 animate-spin" />
               <span>{isJa ? '読み込み中...' : 'Loading...'}</span>
             </div>
+          ) : !user ? (
+            /* 未ログイン時の表示 */
+            <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary mx-auto">
+                <LogIn className="size-5" />
+              </div>
+              <p className="text-xs font-bold text-foreground">
+                {isJa ? '募集を管理するにはログインが必要です' : 'Please sign in to manage studies'}
+              </p>
+              <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                {isJa
+                  ? '慶應大学のアカウントでログインすると、作成した募集実験の管理や被験者名簿の確認ができます。'
+                  : 'Sign in with your Keio account to manage your studies and view participants.'}
+              </p>
+              <Link href="/login" className="inline-block pt-1">
+                <Button size="sm" className="text-xs font-bold gap-1.5">
+                  <LogIn className="size-3.5" />
+                  <span>{isJa ? 'ログインする' : 'Sign In'}</span>
+                </Button>
+              </Link>
+            </div>
           ) : myExperiments.length === 0 ? (
+            /* ログイン済みで作成実験が0件の場合 */
             <div className="rounded-2xl border border-dashed bg-card/40 p-8 text-center space-y-2">
               <p className="text-xs font-bold text-foreground">
                 {isJa ? '現在募集中の実験はありません' : 'No active recruitments'}
@@ -222,7 +235,7 @@ export default function ManagePage() {
                   <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {exp.mode === 'online' || exp.survey_url ? (
+                        {exp.format === 'オンライン' || exp.survey_url ? (
                           <span className="flex items-center gap-1">
                             <Globe2 className="size-3" /> オンライン
                           </span>
@@ -244,14 +257,14 @@ export default function ManagePage() {
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Building2 className="size-3" />
-                        <span>{exp.labName || exp.lab_name || exp.department || '研究室'}</span>
+                        <span>{exp.lab_name || exp.labName || '研究室'}</span>
                       </span>
                       <span className="flex items-center gap-1">
                         <Users className="size-3 text-primary" />
-                        <span>定員: {exp.spotsTotal || exp.spots_total || 10}名</span>
+                        <span>定員: {exp.spots_total || exp.spotsTotal || 0}名</span>
                       </span>
                       <span className="flex items-center gap-1 text-foreground/80 font-medium">
-                        謝礼: {exp.reward || 'Amazonギフト券'}
+                        謝礼: {exp.reward_type || exp.reward || '謝礼あり'}
                       </span>
                     </div>
                   </div>
@@ -269,15 +282,6 @@ export default function ManagePage() {
                       title={isJa ? '募集を取り下げる' : 'Cancel Study'}
                     >
                       <Trash2 className="size-3.5" />
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleOpenCreateModal}
-                      className="h-8 text-xs font-semibold"
-                    >
-                      <span>{isJa ? '編集' : 'Edit'}</span>
                     </Button>
 
                     <Button
@@ -313,7 +317,7 @@ export default function ManagePage() {
 
             <p className="text-xs text-muted-foreground leading-relaxed">
               「<strong className="text-foreground">{deletingTitle}</strong>」の募集を終了・削除します。
-              一覧から非表示になり、被験者からの新規応募を受け付けなくなります。
+              データベースから削除され、被験者からの新規応募を受け付けなくなります。
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">
@@ -346,7 +350,7 @@ export default function ManagePage() {
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         onSuccess={() => {
-          fetchExperiments()
+          fetchMyExperiments()
         }}
       />
 

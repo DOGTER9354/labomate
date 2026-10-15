@@ -143,7 +143,7 @@ export function ExperimentDialog({
   const hasAnyBookingForThisExp = userBookedSlots.length > 0
   const isBlockedBySingleSlotRule = !allowMultipleSlots && hasAnyBookingForThisExp
 
-  // 応募実行（枠数の減算同期を含む）
+  // 応募実行（枠数とスロットの確実な減算同期）
   const handleApply = async () => {
     setErrorMessage(null)
 
@@ -218,28 +218,28 @@ export function ExperimentDialog({
         }
       }
 
-      // 3. ★ RPC関数で experiments テーブルの枠数を即時確実に更新 (spots_left - 1 & スロットの bookedCount + 1)
+      // 3. ★ DBから最新レコードを取得して確実に枠数を減算更新（RPC不使用で安定実行）
       try {
-        const { error: rpcErr } = await supabase.rpc('book_experiment_slot', {
-          target_exp_id: String(experiment.id),
-          target_slot_id: selectedSlotId || '',
-          target_slot_time: slotTimeText,
-        })
+        const { data: currentDbExp, error: fetchErr } = await supabase
+          .from('experiments')
+          .select('spots_left, spots_total, slots')
+          .eq('id', experiment.id)
+          .single()
 
-        if (rpcErr) {
-          // RPCが存在しない・失敗した場合のフォールバック
-          const currentSpotsLeft = Number(expAny.spotsLeft ?? expAny.spots_left ?? 10)
-          const updatedSpotsLeft = Math.max(0, currentSpotsLeft - 1)
+        if (!fetchErr && currentDbExp) {
+          const totalVal = Number(currentDbExp.spots_total ?? 10)
+          const leftVal = Number(currentDbExp.spots_left ?? totalVal)
+          const nextSpotsLeft = Math.max(0, leftVal - 1)
 
-          let rawSlots = expAny.slots
-          if (typeof rawSlots === 'string') {
-            try { rawSlots = JSON.parse(rawSlots) } catch (e) { rawSlots = [] }
+          let dbSlots = currentDbExp.slots
+          if (typeof dbSlots === 'string') {
+            try { dbSlots = JSON.parse(dbSlots) } catch (e) { dbSlots = [] }
           }
-          let updatedSlots = Array.isArray(rawSlots) ? [...rawSlots] : []
+          let updatedSlots = Array.isArray(dbSlots) ? [...dbSlots] : []
 
           if (updatedSlots.length > 0 && selectedSlotId) {
             updatedSlots = updatedSlots.map((slot: any) => {
-              if (slot.id === selectedSlotId || slot.time === slotTimeText) {
+              if (String(slot.id) === String(selectedSlotId) || slot.time === slotTimeText) {
                 const currentBooked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
                 return { ...slot, bookedCount: currentBooked + 1 }
               }
@@ -247,20 +247,26 @@ export function ExperimentDialog({
             })
           }
 
-          await supabase
+          const { error: updateErr } = await supabase
             .from('experiments')
             .update({
-              spots_left: updatedSpotsLeft,
+              spots_left: nextSpotsLeft,
               slots: updatedSlots,
               updated_at: new Date().toISOString(),
             })
             .eq('id', experiment.id)
+
+          if (updateErr) {
+            console.warn('Update error:', updateErr.message)
+          } else {
+            console.log('Successfully decremented spot! Remaining:', nextSpotsLeft)
+          }
         }
       } catch (slotUpdateErr) {
-        console.warn('Failed to update remaining spots in DB:', slotUpdateErr)
+        console.warn('DB update catch:', slotUpdateErr)
       }
 
-      // 4. 親コンポーネント（dashboard.tsx）に通知して画面側の枠数も即時更新
+      // 4. 親コンポーネント（dashboard.tsx）に通知
       if (onConfirm && selectedSlotId) {
         onConfirm(experiment.id, selectedSlotId)
       }
@@ -269,7 +275,7 @@ export function ExperimentDialog({
       setTimeout(() => {
         setAppliedSuccess(false)
         onOpenChange(false)
-      }, 1600)
+      }, 1500)
     } catch (err: any) {
       console.error('Apply error:', err)
       setErrorMessage(err.message || '応募処理に失敗しました。')
@@ -445,7 +451,7 @@ export function ExperimentDialog({
                     // 自分が既にこのスロットを予約済みかどうか判定
                     const isAlreadyBookedByMe = userBookedSlots.some(
                       (b) =>
-                        (b.id && b.id === slot.id) ||
+                        (b.id && String(b.id) === String(slot.id)) ||
                         (b.time && b.time.trim() === slot.time?.trim())
                     )
 
@@ -470,7 +476,6 @@ export function ExperimentDialog({
                       >
                         <span className="font-mono">{slot.time || '日時枠'}</span>
                         <div className="flex items-center gap-1.5 text-[10px]">
-                          {/* ★ 予約済みであっても、スロットの残り枠数を一緒に明示 */}
                           {isAlreadyBookedByMe ? (
                             <span className="text-emerald-500 font-bold">
                               予約済み ({remainingInSlot > 0 ? `残り ${remainingInSlot}枠` : '満員'})

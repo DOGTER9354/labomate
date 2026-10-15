@@ -12,7 +12,7 @@ import {
   LogIn,
   AlertCircle,
   HelpCircle,
-  Loader2,
+  Clock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,12 +30,11 @@ export default function ShopPage() {
   const [pinCount, setPinCount] = useState<number>(0)
   const [badgeCount, setBadgeCount] = useState<number>(0)
   const [loadingProfile, setLoadingProfile] = useState(false)
-  const [exchangingItem, setExchangingItem] = useState<string | null>(null)
 
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [message] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Supabase からプロファイルとウォレット残高を取得
+  // Supabase からプロファイルとウォレット残高を取得（閲覧のみ維持）
   const fetchWallet = useCallback(async () => {
     if (!user) {
       setLaboCoins(0)
@@ -57,7 +56,6 @@ export default function ShopPage() {
         setPinCount(data.item_pin_count ?? 0)
         setBadgeCount(data.item_badge_count ?? 0)
       } else {
-        // レコードが未作成の場合は初期インサート
         const initialCoins = 350
         await supabase.from('user_profiles').upsert({
           id: user.id,
@@ -81,78 +79,6 @@ export default function ShopPage() {
     fetchWallet()
   }, [fetchWallet])
 
-  // アイテム交換処理
-  const handleExchange = async (itemType: 'pin' | 'badge', cost: number, itemName: string) => {
-    if (!user) {
-      setAuthGuardOpen(true)
-      return
-    }
-
-    if (laboCoins < cost) {
-      setMessage({
-        type: 'error',
-        text: isJa ? 'コインが不足しています。実験に参加してコインを獲得しましょう！' : 'Not enough coins!',
-      })
-      setTimeout(() => setMessage(null), 3500)
-      return
-    }
-
-    setExchangingItem(itemType)
-
-    try {
-      const nextCoins = laboCoins - cost
-      const nextPinCount = itemType === 'pin' ? pinCount + 1 : pinCount
-      const nextBadgeCount = itemType === 'badge' ? badgeCount + 1 : badgeCount
-
-      // Supabase の user_profiles を更新
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({
-          labo_coins: nextCoins,
-          item_pin_count: nextPinCount,
-          item_badge_count: nextBadgeCount,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id)
-
-      if (error) throw error
-
-      // 画面の状態を更新
-      setLaboCoins(nextCoins)
-      if (itemType === 'pin') setPinCount(nextPinCount)
-      if (itemType === 'badge') setBadgeCount(nextBadgeCount)
-
-      // ローカルキャッシュも同期更新（他画面の参照用）
-      try {
-        const cached = localStorage.getItem('labomate_user_profile')
-        const parsed = cached ? JSON.parse(cached) : {}
-        localStorage.setItem(
-          'labomate_user_profile',
-          JSON.stringify({ ...parsed, laboCoins: nextCoins })
-        )
-      } catch (e) {
-        console.error(e)
-      }
-
-      setMessage({
-        type: 'success',
-        text: isJa
-          ? `「${itemName}」と交換しました！マイページの財布＆アイテムから確認できます。`
-          : `Exchanged for ${itemName}!`,
-      })
-      setTimeout(() => setMessage(null), 4000)
-    } catch (err: any) {
-      console.error(err)
-      setMessage({
-        type: 'error',
-        text: err.message || (isJa ? '交換に失敗しました。' : 'Exchange failed.'),
-      })
-      setTimeout(() => setMessage(null), 3500)
-    } finally {
-      setExchangingItem(null)
-    }
-  }
-
   return (
     <div className="min-h-dvh bg-background text-foreground pb-24">
       {/* 画面トップバー */}
@@ -174,6 +100,30 @@ export default function ShopPage() {
       </div>
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:px-8 space-y-6">
+        {/* ★ 交換停止中・準備中アナウンスバナー */}
+        <div className="p-4 rounded-2xl border border-primary/30 bg-primary/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-start gap-3">
+            <span className="p-2 rounded-xl bg-primary/20 text-primary shrink-0 mt-0.5">
+              <Clock className="size-4" />
+            </span>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-foreground">
+                  {isJa ? 'アイテム交換機能は現在準備中です' : 'Item Exchange Currently Paused'}
+                </span>
+                <Badge variant="secondary" className="text-[10px] bg-primary/20 text-primary border-primary/30 font-bold">
+                  準備中
+                </Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {isJa
+                  ? 'CoLaboのアップデートに伴い、アイテム交換機能を一時停止しています。獲得・所持している Labo Coin（LC）はそのまま安全に引き継がれます。'
+                  : 'Item exchange is temporarily paused for updates. Your earned Labo Coins are safely preserved.'}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* 未ログイン時バナー */}
         {!user && (
           <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -183,7 +133,7 @@ export default function ShopPage() {
                 <span>未ログイン状態です</span>
               </p>
               <p className="text-[11px] text-muted-foreground">
-                実験やアンケートに参加してコインを獲得・保持したり、アイテムを交換するにはログインが必要です。
+                実験やアンケートに参加してコインを獲得・保持するにはログインが必要です。
               </p>
             </div>
             <Button
@@ -247,12 +197,12 @@ export default function ShopPage() {
         {/* アイテム一覧 */}
         <section className="space-y-3">
           <h2 className="text-sm font-bold text-foreground">
-            {isJa ? '利用可能なブーストアイテム' : 'Boost Items'}
+            {isJa ? '利用可能なブーストアイテム（準備中）' : 'Boost Items (Coming Soon)'}
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* アイテム 1: 24h 最上部固定ピン */}
-            <div className="rounded-2xl border bg-card p-5 space-y-4 flex flex-col justify-between hover:border-primary/40 transition-colors">
+            <div className="rounded-2xl border bg-card p-5 space-y-4 flex flex-col justify-between opacity-85">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="p-2.5 rounded-xl bg-primary/10 text-primary">
@@ -277,21 +227,18 @@ export default function ShopPage() {
                 </div>
               </div>
 
+              {/* 交換ボタンを準備中に変更 */}
               <Button
                 size="sm"
-                disabled={exchangingItem === 'pin'}
-                onClick={() => handleExchange('pin', 100, '24h 最上部固定ピン')}
-                className="w-full text-xs font-bold mt-2"
+                disabled
+                className="w-full text-xs font-bold mt-2 bg-muted text-muted-foreground cursor-not-allowed hover:bg-muted"
               >
-                {exchangingItem === 'pin' ? (
-                  <Loader2 className="size-3.5 animate-spin mr-1" />
-                ) : null}
-                <span>{user ? '100 LC で交換する' : 'ログインして交換'}</span>
+                <span>現在準備中（交換停止中）</span>
               </Button>
             </div>
 
             {/* アイテム 2: 急募アピールバッジ */}
-            <div className="rounded-2xl border bg-card p-5 space-y-4 flex flex-col justify-between hover:border-orange-500/40 transition-colors">
+            <div className="rounded-2xl border bg-card p-5 space-y-4 flex flex-col justify-between opacity-85">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="p-2.5 rounded-xl bg-orange-500/10 text-orange-500">
@@ -316,16 +263,13 @@ export default function ShopPage() {
                 </div>
               </div>
 
+              {/* 交換ボタンを準備中に変更 */}
               <Button
                 size="sm"
-                disabled={exchangingItem === 'badge'}
-                onClick={() => handleExchange('badge', 50, '急募アピールバッジ')}
-                className="w-full text-xs font-bold mt-2"
+                disabled
+                className="w-full text-xs font-bold mt-2 bg-muted text-muted-foreground cursor-not-allowed hover:bg-muted"
               >
-                {exchangingItem === 'badge' ? (
-                  <Loader2 className="size-3.5 animate-spin mr-1" />
-                ) : null}
-                <span>{user ? '50 LC で交換する' : 'ログインして交換'}</span>
+                <span>現在準備中（交換停止中）</span>
               </Button>
             </div>
           </div>
