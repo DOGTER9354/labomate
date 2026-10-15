@@ -65,7 +65,7 @@ export function AuthGuardDialog({
             <h3 className="font-bold text-sm sm:text-base text-foreground">
               {title || defaultTitle}
             </h3>
-            <p className="text-[11px] text-muted-foreground">Labomate Academic Platform</p>
+            <p className="text-[11px] text-muted-foreground">CoLabo Academic Platform</p>
           </div>
         </div>
 

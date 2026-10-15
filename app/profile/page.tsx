@@ -1214,7 +1214,7 @@ export default function ProfilePage() {
 
               <div className="rounded-2xl border bg-card divide-y text-xs">
                 <a
-                  href="https://x.com/Labomate1005"
+                  href="https://x.com/CoLabo1015"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="p-4 flex items-center justify-between hover:bg-muted/40 transition-colors group"
@@ -1225,7 +1225,7 @@ export default function ProfilePage() {
                     </div>
                     <div>
                       <p className="font-bold text-foreground flex items-center gap-1.5">
-                        <span>公式 X (@Labomate1005)</span>
+                        <span>公式 X (@CoLabo1015)</span>
                         <ExternalLink className="size-3 text-muted-foreground group-hover:text-foreground" />
                       </p>
                       <p className="text-[11px] text-muted-foreground">
@@ -1237,7 +1237,7 @@ export default function ProfilePage() {
                 </a>
 
                 <a
-                  href="https://instagram.com/labomate1005?obrf=MXNneWc1cXNsazRl"
+                  href="https://www.instagram.com/colabo1015?mdxt=MXNneWc1cXNsazRl"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="p-4 flex items-center justify-between hover:bg-muted/40 transition-colors group"
@@ -1248,7 +1248,7 @@ export default function ProfilePage() {
                     </div>
                     <div>
                       <p className="font-bold text-foreground flex items-center gap-1.5">
-                        <span>公式 Instagram (@labomate1005)</span>
+                        <span>公式 Instagram (@colabo1015)</span>
                         <ExternalLink className="size-3 text-muted-foreground group-hover:text-foreground" />
                       </p>
                       <p className="text-[11px] text-muted-foreground">
@@ -1320,11 +1320,11 @@ export default function ProfilePage() {
               <div className="rounded-2xl border bg-card p-5 space-y-3 text-xs">
                 <div className="flex items-center justify-between pb-3 border-b">
                   <span className="text-muted-foreground">サービス名</span>
-                  <span className="font-bold text-foreground">Labomate (ラボメイト)</span>
+                  <span className="font-bold text-foreground">CoLabo (コラボ)</span>
                 </div>
                 <div className="flex items-center justify-between pb-3 border-b">
                   <span className="text-muted-foreground">運営組織</span>
-                  <span className="font-bold text-foreground">Labomate Project (大学間研究・実験支援プラットフォーム)</span>
+                  <span className="font-bold text-foreground">CoLabo Project (大学間研究・実験・プロジェクト支援プラットフォーム)</span>
                 </div>
                 <div className="flex items-center justify-between pb-3 border-b">
                   <span className="text-muted-foreground">展開エリア</span>
@@ -1339,7 +1339,7 @@ export default function ProfilePage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">バージョン</span>
-                  <span className="font-mono text-muted-foreground">v1.2.0 (Academic Release)</span>
+                  <span className="font-mono text-muted-foreground">v1.0.0 (Academic Release)</span>
                 </div>
               </div>
             </section>

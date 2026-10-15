@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { Search, Compass, Coins, User, Sun, Moon, Laptop, Check } from 'lucide-react'
+import Image from 'next/image'
+import { Search, Coins, User, Sun, Moon, Laptop, Check } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -82,25 +83,32 @@ export function TopNav({
   return (
     <header className="sticky top-0 z-30 border-b border-border/80 bg-background/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        {/* ロゴ */}
+        {/* ロゴ ＆ アプリ名（CoLabo） */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
-            <Compass className="size-5" />
+          <div className="relative size-9 rounded-xl overflow-hidden border border-border/60 bg-muted/30 shadow-xs transition-transform group-hover:scale-105">
+            <Image
+              src="/colabo-icon.png"
+              alt="CoLabo Logo"
+              width={36}
+              height={36}
+              className="object-cover"
+              priority
+            />
           </div>
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5 leading-none">
-              <span className="font-bold text-base tracking-tight text-foreground">
-                Labomate
+              <span className="font-extrabold text-base tracking-tight text-foreground group-hover:text-primary transition-colors">
+                CoLabo
               </span>
               <Badge
                 variant="secondary"
-                className="text-[9px] px-1.5 py-0 font-bold bg-muted text-muted-foreground uppercase"
+                className="text-[9px] px-1.5 py-0 font-bold bg-primary/10 text-primary border border-primary/20 uppercase"
               >
-                Keio
+                Keio SFC
               </Badge>
             </div>
             <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-              学内実験・調査募集プラットフォーム
+              {isJa ? '研究・プロジェクト共創プラットフォーム' : 'Research & Project Matching'}
             </span>
           </div>
         </Link>

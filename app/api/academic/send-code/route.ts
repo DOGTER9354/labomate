@@ -50,7 +50,7 @@ export async function POST(request: Request) {
 
     // 本番メール送信サービス（Resend / SendGrid 等）が未接続の間は、開発・検証しやすいようにコンソールに出力
     console.log(`\n========================================`)
-    console.log(`[Labomate Academic Auth]`)
+    console.log(`[CoLabo Academic Auth]`)
     console.log(`宛先: ${cleanEmail}`)
     console.log(`認証コード (6桁): ${code}`)
     console.log(`有効期限: 15分`)

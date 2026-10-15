@@ -48,7 +48,7 @@ export default function AboutPage() {
               <Sparkles className="size-4" />
             </span>
             <h1 className="text-lg sm:text-xl font-bold text-foreground">
-              {isJa ? 'Labomate Keio サポート・公式情報' : 'Labomate Keio Help Center'}
+              {isJa ? 'CoLabo サポート・公式情報' : 'CoLabo Help Center'}
             </h1>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">

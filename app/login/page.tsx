@@ -83,7 +83,7 @@ export default function LoginPage() {
             vision: '裸眼',
             laboCoins: 350,
           }
-          localStorage.setItem('labomate_user_profile', JSON.stringify(initialProfile))
+          localStorage.setItem('CoLabo_user_profile', JSON.stringify(initialProfile))
         } catch (e) {
           console.error(e)
         }
@@ -148,7 +148,7 @@ export default function LoginPage() {
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
             {mode === 'signin'
-              ? isJa ? 'Labomate にログイン' : 'Sign in to Labomate'
+              ? isJa ? 'CoLabo にログイン' : 'Sign in to CoLabo'
               : isJa ? '新規アカウントを作成' : 'Create an Account'}
           </h1>
           <p className="text-xs text-muted-foreground max-w-xs mx-auto">
