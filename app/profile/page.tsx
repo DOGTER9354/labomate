@@ -35,10 +35,19 @@ import {
   LogIn,
   AlertCircle,
   Unlink,
+  Loader2,
+  KeyRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { useLanguage } from '@/lib/language-context'
 import { useTheme } from '@/lib/theme-context'
 import { useAuth } from '@/lib/auth-context'
@@ -86,6 +95,21 @@ export default function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false)
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
   const [keioDialogOpen, setKeioDialogOpen] = useState(false)
+
+  // ★ メールアドレス変更用ステート
+  const [emailModalOpen, setEmailModalOpen] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [emailLoading, setEmailLoading] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [emailSuccessMsg, setEmailSuccessMsg] = useState<string | null>(null)
+
+  // ★ パスワード再設定用ステート
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordSuccessMsg, setPasswordSuccessMsg] = useState<string | null>(null)
 
   // 大学認証ステータス
   const [isAcademicVerified, setIsAcademicVerified] = useState(false)
@@ -398,6 +422,72 @@ export default function ProfilePage() {
       alert(err.message || '解除に失敗しました。')
     } finally {
       setIsUnlinking(false)
+    }
+  }
+
+  // ★ メールアドレス変更申請処理
+  const handleUpdateEmail = async () => {
+    setEmailError(null)
+    setEmailSuccessMsg(null)
+
+    const clean = newEmail.trim().toLowerCase()
+    if (!clean || !clean.includes('@')) {
+      setEmailError('有効なメールアドレスを入力してください。')
+      return
+    }
+
+    if (clean === user?.email) {
+      setEmailError('現在登録されているメールアドレスと同じです。')
+      return
+    }
+
+    setEmailLoading(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ email: clean })
+      if (error) throw error
+
+      setEmailSuccessMsg(
+        '確認用メールを送信しました。新旧両方のアドレスに届く確認リンクをクリックすると変更が完了します。'
+      )
+      setNewEmail('')
+    } catch (err: any) {
+      setEmailError(err.message || 'メールアドレスの変更申請に失敗しました。')
+    } finally {
+      setEmailLoading(false)
+    }
+  }
+
+  // ★ パスワード再設定処理
+  const handleUpdatePassword = async () => {
+    setPasswordError(null)
+    setPasswordSuccessMsg(null)
+
+    if (newPassword.length < 6) {
+      setPasswordError('新しいパスワードは6文字以上で設定してください。')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('パスワード（確認用）が一致しません。')
+      return
+    }
+
+    setPasswordLoading(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+
+      setPasswordSuccessMsg('パスワードを変更しました。')
+      setNewPassword('')
+      setConfirmPassword('')
+      setTimeout(() => {
+        setPasswordModalOpen(false)
+        setPasswordSuccessMsg(null)
+      }, 1500)
+    } catch (err: any) {
+      setPasswordError(err.message || 'パスワードの変更に失敗しました。')
+    } finally {
+      setPasswordLoading(false)
     }
   }
 
@@ -1019,7 +1109,16 @@ export default function ProfilePage() {
                   <p className="text-[11px] text-muted-foreground">現在: {profile.email}</p>
                 </div>
                 {user ? (
-                  <Button size="sm" variant="outline" className="h-8 text-xs self-start sm:self-auto">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setEmailModalOpen(true)
+                      setEmailError(null)
+                      setEmailSuccessMsg(null)
+                    }}
+                    className="h-8 text-xs self-start sm:self-auto font-medium"
+                  >
                     変更を申請
                   </Button>
                 ) : (
@@ -1043,7 +1142,16 @@ export default function ProfilePage() {
                   <p className="text-[11px] text-muted-foreground">アカウントのセキュリティ設定を更新します</p>
                 </div>
                 {user ? (
-                  <Button size="sm" variant="outline" className="h-8 text-xs self-start sm:self-auto">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setPasswordModalOpen(true)
+                      setPasswordError(null)
+                      setPasswordSuccessMsg(null)
+                    }}
+                    className="h-8 text-xs self-start sm:self-auto font-medium"
+                  >
                     パスワードを変更
                   </Button>
                 ) : (
@@ -1172,7 +1280,8 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">被験者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験・調査への参加ステップ</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-1. 「探す」から空きコマや関心のある実験・調査を検索<br />
+1. 「探す」から空きコマや関心のある実験・調査を検索
+<br />
 2. 希望の時間帯スロットを選択して応募確定<br />
 3. 当日に会場またはオンラインで参加し、謝礼を受領
                   </p>
@@ -1182,7 +1291,8 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">研究者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験募集・参加枠の管理</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
+1. 「募集」タブから新規の対面実験またはアンケートを作成
+<br />
 2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
 3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
                   </p>
@@ -1348,6 +1458,158 @@ export default function ProfilePage() {
         currentEmail={user?.email}
         onVerifiedSuccess={handleVerifiedSuccess}
       />
+
+      {/* ★ 登録メールアドレス変更モーダル */}
+      <Dialog open={emailModalOpen} onOpenChange={setEmailModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Mail className="size-5" />
+              </span>
+              <DialogTitle className="text-base font-bold text-foreground">
+                登録メールアドレスの変更
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              新しいログイン用メールアドレスを入力してください。確認メールが送信されます。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">現在のアドレス</label>
+              <Input
+                readOnly
+                value={profile.email}
+                className="text-xs bg-muted/40 cursor-default focus-visible:ring-0"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground">新しいメールアドレス</label>
+              <Input
+                type="email"
+                placeholder="new-email@example.com"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                className="text-xs font-mono"
+              />
+            </div>
+
+            {emailError && (
+              <div className="p-2.5 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{emailError}</span>
+              </div>
+            )}
+
+            {emailSuccessMsg && (
+              <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs flex items-start gap-2">
+                <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{emailSuccessMsg}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEmailModalOpen(false)}
+                className="text-xs"
+              >
+                閉じる
+              </Button>
+              <Button
+                size="sm"
+                disabled={emailLoading || !newEmail.trim()}
+                onClick={handleUpdateEmail}
+                className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground"
+              >
+                {emailLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
+                <span>変更メールを送信</span>
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ★ パスワード再設定モーダル */}
+      <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <KeyRound className="size-5" />
+              </span>
+              <DialogTitle className="text-base font-bold text-foreground">
+                パスワードの変更
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              新しいログインパスワード（6文字以上）を設定してください。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground">新しいパスワード</label>
+              <Input
+                type="password"
+                placeholder="6文字以上の英数字"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground">新しいパスワード（確認用）</label>
+              <Input
+                type="password"
+                placeholder="もう一度入力してください"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="text-xs"
+              />
+            </div>
+
+            {passwordError && (
+              <div className="p-2.5 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{passwordError}</span>
+              </div>
+            )}
+
+            {passwordSuccessMsg && (
+              <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
+                <CheckCircle2 className="size-4 shrink-0" />
+                <span>{passwordSuccessMsg}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPasswordModalOpen(false)}
+                className="text-xs"
+              >
+                キャンセル
+              </Button>
+              <Button
+                size="sm"
+                disabled={passwordLoading || !newPassword || !confirmPassword}
+                onClick={handleUpdatePassword}
+                className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground"
+              >
+                {passwordLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
+                <span>パスワードを更新</span>
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
