@@ -15,7 +15,6 @@ import { Badge } from '@/components/ui/badge'
 import {
   MapPin,
   Clock,
-  Coins,
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
@@ -67,7 +66,7 @@ export function ExperimentDialog({
   const [hasExistingRealName, setHasExistingRealName] = useState(false)
   const [loadingProfile, setLoadingProfile] = useState(false)
 
-  // ★ 慶應認証ステート（マイページと100%同一基準）
+  // 慶應認証ステート（マイページと100%同一基準）
   const [isKeioVerified, setIsKeioVerified] = useState(false)
 
   // ユーザーのこの実験に対する既存予約を取得
@@ -195,7 +194,7 @@ export function ExperimentDialog({
   const hasAnyBookingForThisExp = userBookedSlots.length > 0
   const isBlockedBySingleSlotRule = !allowMultipleSlots && hasAnyBookingForThisExp
 
-  // ★ 慶應認証バッジ限定判定（プロフィール取得中完了後に判定）
+  // 慶應認証バッジ限定判定（プロフィール取得中完了後に判定）
   const requiresKeioBadge = Boolean(expAny.requires_keio_badge || expAny.requiresKeioBadge)
   const isBlockedByKeioRule = !loadingProfile && requiresKeioBadge && !isKeioVerified
 
@@ -371,8 +370,6 @@ export function ExperimentDialog({
     valueDisplay = '支給あり'
   }
 
-  const earnedCoins = isOnline ? 20 : (expAny.rewardCoins || expAny.coins || 100)
-
   const durationText =
     typeof expAny.durationMinutes === 'number'
       ? `${expAny.durationMinutes}分`
@@ -426,7 +423,7 @@ export function ExperimentDialog({
           </div>
         ) : (
           <div className="space-y-5 pt-2">
-            {/* 謝礼内容（種別）と 謝礼金額（詳細） */}
+            {/* ★ 謝礼内容・謝礼金額・所要時間・集合場所（コイン枠を除外して整理） */}
             <div className="grid grid-cols-2 gap-2.5 p-3.5 rounded-xl bg-muted/30 border text-xs">
               <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
@@ -448,16 +445,6 @@ export function ExperimentDialog({
                 </p>
               </div>
 
-              <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 space-y-1">
-                <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium">
-                  <Coins className="size-3.5 text-amber-500" />
-                  <span>獲得コイン</span>
-                </span>
-                <p className="font-bold text-amber-500 text-sm">
-                  +{earnedCoins} <span className="text-xs font-normal">LC</span>
-                </p>
-              </div>
-
               <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
                   <Clock className="size-3.5 text-primary" />
@@ -466,7 +453,7 @@ export function ExperimentDialog({
                 <p className="font-bold text-foreground text-xs">{durationText}</p>
               </div>
 
-              <div className="col-span-2 p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
+              <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
                   <MapPin className="size-3.5 text-muted-foreground" />
                   <span>集合・実施場所</span>
@@ -477,7 +464,7 @@ export function ExperimentDialog({
               </div>
             </div>
 
-            {/* ★ 慶應生限定バナー */}
+            {/* 慶應生限定バナー */}
             {requiresKeioBadge && (
               <div
                 className={`p-3 rounded-xl border text-xs flex items-center gap-2.5 ${
@@ -527,7 +514,6 @@ export function ExperimentDialog({
                     const isFull = booked >= capacity
                     const remainingInSlot = Math.max(0, capacity - booked)
 
-                    // 自分が既にこのスロットを予約済みかどうか判定
                     const isAlreadyBookedByMe = userBookedSlots.some(
                       (b) =>
                         (b.id && String(b.id) === String(slot.id)) ||

@@ -131,7 +131,7 @@ export default function ProfilePage() {
           grade: '学部生',
           dominantHand: '右利き',
           vision: '裸眼',
-          laboCoins: 350,
+          laboCoins: 0, // ★ 初期値を 0 に統一
           itemPinCount: 0,
           itemBadgeCount: 0,
         }
@@ -374,10 +374,8 @@ export default function ProfilePage() {
 
     setIsUnlinking(true)
     try {
-      // 1. ローカルキャッシュを即座に破棄
       localStorage.removeItem(`academic_verified_${user.id}`)
 
-      // 2. DBを更新
       const { error } = await supabase
         .from('user_profiles')
         .update({
@@ -441,7 +439,7 @@ export default function ProfilePage() {
                 <span>ゲストモードで閲覧中</span>
               </p>
               <p className="text-[11px] text-muted-foreground">
-                ログインするとプロフィールの登録、実験履歴の同期、Labo Coinsの獲得・利用が可能になります。
+                ログインするとプロフィールの登録、実験履歴の同期、Labo Coinsの確認が可能になります。
               </p>
             </div>
             <Button
@@ -493,7 +491,6 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* 編集ボタン または ログインボタン */}
           <div>
             {user ? (
               isEditing ? (
@@ -540,7 +537,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* 保存完了通知 */}
         {savedNotice && (
           <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 text-xs font-bold flex items-center gap-2">
             <CheckCircle2 className="size-4 shrink-0" />
@@ -619,7 +615,6 @@ export default function ProfilePage() {
         {/* タブ 1: 基本情報 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
-            {/* 大学認証ステータス */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -669,7 +664,6 @@ export default function ProfilePage() {
                       <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/40 hidden sm:inline-flex">
                         学内限定実験へアクセス可能
                       </Badge>
-                      {/* 🔓 認証解除ボタン */}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -742,7 +736,6 @@ export default function ProfilePage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                {/* ニックネーム */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">表示名（ニックネーム）</label>
                   <Input
@@ -754,7 +747,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* アカウントメール */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">アカウントメール</label>
                   <Input
@@ -764,7 +756,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 本名（母国語表記） */}
                 <div className="space-y-1.5">
                   <label className="text-foreground font-bold flex items-center gap-1.5">
                     <span>本名（母国語表記・漢字等）</span>
@@ -779,7 +770,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 本名（英語・ローマ字表記） */}
                 <div className="space-y-1.5">
                   <label className="text-foreground font-bold flex items-center gap-1.5">
                     <span>本名（英語・ローマ字表記）</span>
@@ -794,7 +784,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 所属・学部 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">所属大学・学部・研究科</label>
                   <Input
@@ -805,7 +794,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 学年 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">学年</label>
                   <Input
@@ -816,7 +804,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 利き手 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">利き手</label>
                   <Input
@@ -827,7 +814,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 視力 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">視力・矯正</label>
                   <Input
@@ -952,14 +938,14 @@ export default function ProfilePage() {
                   <span>未ログイン状態です</span>
                 </p>
                 <p className="text-muted-foreground text-[11px] leading-relaxed">
-                  実験参加によるコイン獲得やブーストアイテムの保持・交換にはアカウント登録が必要です。
+                  ブーストアイテムの保持・利用にはアカウント登録が必要です。
                 </p>
                 <Button
                   size="sm"
                   onClick={() => router.push('/login')}
                   className="h-7 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white"
                 >
-                  ログインしてコインを貯める
+                  ログインする
                 </Button>
               </div>
             )}
@@ -1186,9 +1172,9 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">被験者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験・調査への参加ステップ</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-                    1. 「探す」から空きコマや関心のある実験・調査を検索<br />
-                    2. 希望の時間帯スロットを選択して応募確定<br />
-                    3. 当日に会場またはオンラインで参加し、謝礼＆Labo Coinを獲得
+1. 「探す」から空きコマや関心のある実験・調査を検索<br />
+2. 希望の時間帯スロットを選択して応募確定<br />
+3. 当日に会場またはオンラインで参加し、謝礼を受領
                   </p>
                 </div>
 
@@ -1196,9 +1182,9 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">研究者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験募集・参加枠の管理</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-                    1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
-                    2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
-                    3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
+1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
+2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
+3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
                   </p>
                 </div>
               </div>

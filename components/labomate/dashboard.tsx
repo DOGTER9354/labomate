@@ -8,7 +8,6 @@ import {
   SearchX,
   Building2,
   Globe2,
-  Coins,
   CheckCircle2,
   Clock,
   MapPin,
@@ -16,6 +15,7 @@ import {
   Gift,
   Calendar,
   RefreshCw,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -73,7 +73,7 @@ export function Dashboard() {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [userName, setUserName] = useState('周誠')
 
-  // コイン獲得通知用トースト状態
+  // 応募完了通知用トースト状態
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   // 保存済みプロフィールから名前を読み込み
@@ -126,7 +126,7 @@ export function Dashboard() {
     }
   }, [user])
 
-  // Supabaseから最新データを取得（★ applicationsの実データと突合して枠数を100%正確に自動算出）
+  // Supabaseから最新データを取得
   const fetchExperiments = useCallback(async () => {
     try {
       const [{ data: expData, error: expError }, { data: appData }] = await Promise.all([
@@ -173,13 +173,11 @@ export function Dashboard() {
             }
           }
 
-          // ★ この実験に紐づく実際の応募数（有効なもの）
           const expApps = activeApplications.filter(
             (a) => String(a.experiment_id) === String(item.id)
           )
           const totalBookedCount = expApps.length
 
-          // ★ スロットごとの実際の応募数を正確に集計
           const updatedSlots = parsedSlots.map((slot: any) => {
             const slotAppsCount = expApps.filter(
               (a) =>
@@ -208,7 +206,6 @@ export function Dashboard() {
             Number(item.max_participants) ||
             (slotsCapacitySum > 0 ? slotsCapacitySum : 10)
 
-          // ★ 残り枠 = 総定員 - 実応募数
           const calculatedSpotsLeft = Math.max(0, spotsTotalVal - totalBookedCount)
 
           return {
@@ -231,7 +228,6 @@ export function Dashboard() {
             spots_total: Math.max(1, spotsTotalVal),
             allowMultipleSlots: Boolean(item.allow_multiple_slots),
             allow_multiple_slots: Boolean(item.allow_multiple_slots),
-            // ★ 慶應認証バッジ限定フラグを確実に渡す
             requires_keio_badge: Boolean(item.requires_keio_badge),
             requiresKeioBadge: Boolean(item.requires_keio_badge),
             requirements: Array.isArray(item.requirements)
@@ -257,7 +253,6 @@ export function Dashboard() {
     }
   }, [])
 
-  // ログイン状態やユーザーが変わったタイミングで即座に再取得
   useEffect(() => {
     if (!authLoading) {
       fetchExperiments()
@@ -265,7 +260,6 @@ export function Dashboard() {
     }
   }, [authLoading, user?.id, fetchExperiments, fetchUserBookings])
 
-  // 🔃 リロードボタン
   const handleRefresh = async () => {
     setIsRefreshing(true)
     try {
@@ -277,7 +271,6 @@ export function Dashboard() {
     }
   }
 
-  // 対面・オンラインのカウント計算
   const counts = useMemo(() => {
     let inPersonCount = 0
     let onlineCount = 0
@@ -292,7 +285,6 @@ export function Dashboard() {
     }
   }, [experiments])
 
-  // フィルタリング処理
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return experiments.filter((exp) => {
@@ -316,24 +308,20 @@ export function Dashboard() {
 
   const filterLabel = FILTERS.find((f) => f.id === filter)?.label
 
-  // モーダルを開く処理
   const openExperiment = (exp: Experiment) => {
     setSelected(exp)
     setDialogOpen(true)
   }
 
-  // 直近の予約セッションを特定
   const nextBooking = userApplications.length > 0 ? userApplications[0] : null
   const nextExperiment = nextBooking
     ? experiments.find((e) => e.id === nextBooking.experiment_id)
     : null
 
-  // 実験応募確定処理（即時更新 ＆ DB再同期）
+  // 実験応募確定処理（★ コイン加算を行わず完了通知のみ表示）
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
-    // 1. 予約マップを即時更新
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
 
-    // 2. 実験カードの枠数を即座に画面反映
     setExperiments((prev) =>
       prev.map((exp) => {
         if (exp.id === experimentId) {
@@ -368,20 +356,15 @@ export function Dashboard() {
       })
     )
 
-    // 3. コイン獲得トースト
-    const exp = experiments.find((e) => e.id === experimentId)
-    const isOnline = exp?.mode === 'online'
-    const earnedCoins = isOnline ? 20 : 100
-
+    // ★ コイン文言を外し、クリーンな参加確定メッセージを表示
     const message = isJa
-      ? `参加確定！ 報酬に加えて +${earnedCoins} Labo Coin を獲得しました！`
-      : `Confirmed! Earned +${earnedCoins} Labo Coins in addition to reward!`
+      ? '参加予約が完了しました！マイページから予約内容を確認できます。'
+      : 'Booking confirmed! Check details in your My Page.'
     setToastMessage(message)
     setTimeout(() => {
       setToastMessage(null)
     }, 4000)
 
-    // 4. DBの実データと完全再同期
     setTimeout(() => {
       fetchUserBookings()
       fetchExperiments()
@@ -493,9 +476,6 @@ export function Dashboard() {
                 </p>
               </div>
             </div>
-            <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">
-              参加で +100 LC
-            </Badge>
           </div>
         )}
 
@@ -571,19 +551,18 @@ export function Dashboard() {
             </button>
           </div>
 
+          {/* ★ 学術・倫理に配慮した信頼性重視の案内バナー */}
           <div className="mt-2 pt-2 border-t flex flex-wrap items-center justify-between px-2 text-[11px] text-muted-foreground gap-1">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
-                <Coins className="size-3 text-amber-500" />
-                {isJa ? '対面実験参加: +100 LC' : 'In-Person: +100 LC'}
-              </span>
-              <span className="flex items-center gap-1 text-sky-700 dark:text-sky-400 font-medium">
-                <Coins className="size-3 text-amber-500" />
-                {isJa ? 'オンライン回答: +20 LC' : 'Online: +20 LC'}
+            <div className="flex items-center gap-2 text-foreground/80 font-medium">
+              <ShieldCheck className="size-3.5 text-primary" />
+              <span>
+                {isJa
+                  ? '大学内の正規研究室・プロジェクトによる被験者募集プラットフォーム'
+                  : 'Official Academic Research Platform for Universities'}
               </span>
             </div>
             <span className="text-[10px]">
-              {isJa ? '※ 獲得したコインはショップでブーストに利用できます' : 'Use LC to boost studies in Shop'}
+              {isJa ? '各実験の参加条件・倫理配慮事項をご確認の上ご参加ください' : 'Please check study requirements and guidelines before joining'}
             </span>
           </div>
         </div>
@@ -682,13 +661,13 @@ export function Dashboard() {
         }}
       />
 
-      {/* コイン獲得トースト通知 */}
+      {/* 応募確定トースト通知 */}
       {toastMessage && (
         <aside
           aria-live="polite"
           className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border bg-card p-4 shadow-xl text-foreground animate-in fade-in slide-in-from-bottom-4 duration-300"
         >
-          <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+          <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
             <CheckCircle2 className="size-5" />
           </div>
           <div className="text-sm font-semibold pr-2">

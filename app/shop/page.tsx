@@ -13,6 +13,7 @@ import {
   AlertCircle,
   HelpCircle,
   Clock,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,7 +35,7 @@ export default function ShopPage() {
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
   const [message] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Supabase からプロファイルとウォレット残高を取得（閲覧のみ維持）
+  // Supabase からプロファイルとウォレット残高を取得
   const fetchWallet = useCallback(async () => {
     if (!user) {
       setLaboCoins(0)
@@ -52,11 +53,11 @@ export default function ShopPage() {
         .single()
 
       if (!error && data) {
-        setLaboCoins(data.labo_coins ?? 350)
+        setLaboCoins(data.labo_coins ?? 0) // ★ フォールバックを 0 に統一
         setPinCount(data.item_pin_count ?? 0)
         setBadgeCount(data.item_badge_count ?? 0)
       } else {
-        const initialCoins = 350
+        const initialCoins = 0 // ★ 新規作成時の初期値を 0 に統一
         await supabase.from('user_profiles').upsert({
           id: user.id,
           email: user.email,
@@ -100,7 +101,7 @@ export default function ShopPage() {
       </div>
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:px-8 space-y-6">
-        {/* ★ 交換停止中・準備中アナウンスバナー */}
+        {/* 交換停止中・準備中アナウンスバナー */}
         <div className="p-4 rounded-2xl border border-primary/30 bg-primary/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
           <div className="flex items-start gap-3">
             <span className="p-2 rounded-xl bg-primary/20 text-primary shrink-0 mt-0.5">
@@ -117,7 +118,7 @@ export default function ShopPage() {
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
                 {isJa
-                  ? 'CoLaboのアップデートに伴い、アイテム交換機能を一時停止しています。獲得・所持している Labo Coin（LC）はそのまま安全に引き継がれます。'
+                  ? 'CoLaboのアップデートに伴い、アイテム交換機能を一時停止しています。所持している Labo Coin（LC）はそのまま安全に引き継がれます。'
                   : 'Item exchange is temporarily paused for updates. Your earned Labo Coins are safely preserved.'}
               </p>
             </div>
@@ -133,7 +134,7 @@ export default function ShopPage() {
                 <span>未ログイン状態です</span>
               </p>
               <p className="text-[11px] text-muted-foreground">
-                実験やアンケートに参加してコインを獲得・保持するにはログインが必要です。
+                アカウントにログインすると保有コインの確認やウォレット機能を利用できます。
               </p>
             </div>
             <Button
@@ -142,7 +143,7 @@ export default function ShopPage() {
               className="h-8 text-xs font-bold gap-1 bg-amber-500 hover:bg-amber-600 text-white shrink-0 self-start sm:self-auto"
             >
               <LogIn className="size-3.5" />
-              <span>ログインしてコインを貯める</span>
+              <span>ログインする</span>
             </Button>
           </div>
         )}
@@ -160,8 +161,8 @@ export default function ShopPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               {isJa
-                ? '被験者として実験に参加するともらえる「Labo Coin」を使って、研究の募集を有利に進めるブーストアイテムと交換できます。'
-                : 'Redeem Labo Coins earned by participating in studies for recruitment boost items.'}
+                ? '「Labo Coin」を使って、研究募集の露出を高めるブーストアイテムと交換できる専用ショップです。'
+                : 'Redeem Labo Coins for recruitment boost items.'}
             </p>
           </div>
 
@@ -227,7 +228,6 @@ export default function ShopPage() {
                 </div>
               </div>
 
-              {/* 交換ボタンを準備中に変更 */}
               <Button
                 size="sm"
                 disabled
@@ -263,7 +263,6 @@ export default function ShopPage() {
                 </div>
               </div>
 
-              {/* 交換ボタンを準備中に変更 */}
               <Button
                 size="sm"
                 disabled
@@ -275,14 +274,16 @@ export default function ShopPage() {
           </div>
         </section>
 
-        {/* コイン獲得のヒント */}
+        {/* 倫理審査・運用策定に関する公式アナウンス */}
         <section className="rounded-2xl border bg-card p-5 space-y-2 text-xs">
           <h3 className="font-bold text-foreground flex items-center gap-1.5">
-            <HelpCircle className="size-4 text-primary" />
-            <span>Labo Coin を貯めるには？</span>
+            <ShieldCheck className="size-4 text-primary" />
+            <span>Labo Coinの運用および獲得について</span>
           </h3>
           <p className="text-muted-foreground leading-relaxed">
-            学内の対面実験に参加すると <strong>+100 LC</strong>、オンラインアンケートへの回答で <strong>+20 LC</strong> が付与されます（※アカウントログイン中のみ付与されます）。
+            現在、大学の研究倫理審査規程（IRB）および不正参加防止ガイドラインの確認・策定を進めております。
+            そのため、<strong>現時点では実験参加によるLabo Coinの新規付与は一時停止</strong>しております。
+            研究本体の公式謝礼（現金・ギフト券等）の支給には一切影響ございません。機能の再開時期につきましては確定次第お知らせいたします。
           </p>
         </section>
       </main>
