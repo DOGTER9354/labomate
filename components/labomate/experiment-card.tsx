@@ -10,19 +10,24 @@ import {
   CheckCircle2,
   Flame,
   ShieldCheck,
+  Check,
 } from 'lucide-react'
 import { Experiment, formatYen } from '@/lib/experiments'
 import { useLanguage } from '@/lib/language-context'
 
+export type ParticipationStatus = 'none' | 'applied' | 'completed'
+
 interface ExperimentCardProps {
   experiment: Experiment
-  applied?: boolean
+  applied?: boolean // 互換用
+  status?: ParticipationStatus // ★ 参加・完了ステータス
   onOpen: (exp: Experiment) => void
 }
 
 export function ExperimentCard({
   experiment,
   applied = false,
+  status = applied ? 'applied' : 'none',
   onOpen,
 }: ExperimentCardProps) {
   const { language } = useLanguage()
@@ -31,7 +36,7 @@ export function ExperimentCard({
   const expAny = experiment as any
   const isOnline = experiment.mode === 'online' || experiment.location?.includes('オンライン')
 
-  // ★ 慶應生限定フラグ判定
+  // 慶應生限定フラグ判定
   const requiresKeioBadge = Boolean(expAny.requires_keio_badge || expAny.requiresKeioBadge)
 
   // 総定員と残り枠数
@@ -43,9 +48,17 @@ export function ExperimentCard({
   const percent = total > 0 ? Math.min(100, Math.round((filled / total) * 100)) : 0
 
   const isUrgent = left <= 3 && left > 0
+  const isCompleted = status === 'completed'
+  const isApplied = status === 'applied'
 
   return (
-    <div className="rounded-2xl border bg-card p-4 sm:p-5 flex flex-col justify-between hover:border-foreground/30 transition-all shadow-xs relative group">
+    <div
+      className={`rounded-2xl border bg-card p-4 sm:p-5 flex flex-col justify-between transition-all shadow-xs relative group ${
+        isCompleted
+          ? 'opacity-75 bg-muted/20 border-border/70 hover:opacity-100 hover:border-foreground/30'
+          : 'hover:border-foreground/30'
+      }`}
+    >
       <div className="space-y-3">
         {/* カード上部バッジ群 */}
         <div className="flex items-center justify-between gap-1.5 flex-wrap">
@@ -62,7 +75,6 @@ export function ExperimentCard({
               )}
             </Badge>
 
-            {/* ★ 慶應生限定バナー */}
             {requiresKeioBadge && (
               <Badge
                 variant="secondary"
@@ -72,10 +84,19 @@ export function ExperimentCard({
                 <span>慶應生限定</span>
               </Badge>
             )}
+
+            {isCompleted && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 bg-muted/60 text-muted-foreground border-border font-medium"
+              >
+                <span>{isOnline ? '回答完了済み' : '参加完了済み'}</span>
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {isUrgent && (
+            {isUrgent && !isCompleted && (
               <Badge className="bg-rose-500/10 text-rose-500 border border-rose-500/20 text-[10px] px-1.5 py-0 font-bold flex items-center gap-0.5">
                 <Flame className="size-3" />
                 <span>残り{left}枠!</span>
@@ -120,7 +141,7 @@ export function ExperimentCard({
           <div className="h-1.5 w-full bg-muted/60 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-300 ${
-                isUrgent ? 'bg-rose-500' : 'bg-primary'
+                isUrgent && !isCompleted ? 'bg-rose-500' : 'bg-primary'
               }`}
               style={{ width: `${percent}%` }}
             />
@@ -137,7 +158,18 @@ export function ExperimentCard({
           </p>
         </div>
 
-        {applied ? (
+        {/* ★ ボタン表示の3分岐 */}
+        {isCompleted ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onOpen(experiment)}
+            className="h-8 text-xs font-semibold gap-1 text-muted-foreground bg-muted/40 border-border hover:bg-muted"
+          >
+            <Check className="size-3.5" />
+            <span>{isOnline ? '提出済み' : '参加済み'}</span>
+          </Button>
+        ) : isApplied ? (
           <Button
             size="sm"
             variant="secondary"

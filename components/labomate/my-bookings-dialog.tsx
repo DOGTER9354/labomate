@@ -60,7 +60,6 @@ export function MyBookingsDialog({
   // 内部のアクティブタブ
   const [activeTab, setActiveTab] = useState<BookingModalType>(initialType)
 
-  // ★ open が true になる、または initialType が切り替わった時に確実に即時同期
   useEffect(() => {
     if (open) {
       setActiveTab(initialType)
@@ -142,7 +141,7 @@ export function MyBookingsDialog({
     )
   }
 
-  // ★ 厳格に選択されたタブのみを表示
+  // 厳格に選択されたタブのみを表示
   const filteredApplications = useMemo(() => {
     if (activeTab === 'online') {
       return applications.filter((app) => isOnlineItem(app))

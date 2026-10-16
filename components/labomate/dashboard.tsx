@@ -22,7 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { TopNav } from '@/components/labomate/top-nav'
-import { ExperimentCard } from '@/components/labomate/experiment-card'
+import { ExperimentCard, type ParticipationStatus } from '@/components/labomate/experiment-card'
 import { ExperimentDialog } from '@/components/labomate/experiment-dialog'
 import { CreateExperimentDialog } from '@/components/labomate/create-experiment-dialog'
 import {
@@ -64,11 +64,12 @@ export function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
-  // モーダル開閉ステート ＆ 開く種別（'in-person' | 'online'）
   const [myBookingsOpen, setMyBookingsOpen] = useState(false)
   const [bookingsModalType, setBookingsModalType] = useState<BookingModalType>('in-person')
 
   const [isRefreshing, setIsRefreshing] = useState(false)
+  // ★ 実験IDごとの参加ステータスマップ ('none' | 'applied' | 'completed')
+  const [userStatusMap, setUserStatusMap] = useState<Record<string, ParticipationStatus>>({})
   const [bookings, setBookings] = useState<Record<string, string>>({})
   const [userApplications, setUserApplications] = useState<UserApplicationRecord[]>([])
 
@@ -88,10 +89,12 @@ export function Dashboard() {
     }
   }, [])
 
+  // Supabase からユーザー自身の応募・参加履歴を同期取得
   const fetchUserBookings = useCallback(async () => {
     if (!user) {
       setUserApplications([])
       setBookings({})
+      setUserStatusMap({})
       return
     }
 
@@ -105,25 +108,36 @@ export function Dashboard() {
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        const activeApps = data.filter(
-          (a) => !a.status?.includes('回答完了') && a.status !== '完了'
-        )
-        setUserApplications(activeApps)
+        const statusMap: Record<string, ParticipationStatus> = {}
         const bookingMap: Record<string, string> = {}
-        activeApps.forEach((app) => {
-          if (app.experiment_id) {
-            bookingMap[app.experiment_id] = app.slot_id ? String(app.slot_id) : 'booked'
+        const activeApps: UserApplicationRecord[] = []
+
+        data.forEach((app) => {
+          const expId = String(app.experiment_id)
+          const isDone = app.status?.includes('回答完了') || app.status === '完了'
+
+          if (isDone) {
+            statusMap[expId] = 'completed'
+          } else {
+            activeApps.push(app)
+            statusMap[expId] = 'applied'
+            bookingMap[expId] = app.slot_id ? String(app.slot_id) : 'booked'
           }
         })
+
+        setUserApplications(activeApps)
         setBookings(bookingMap)
+        setUserStatusMap(statusMap)
       } else {
         setUserApplications([])
         setBookings({})
+        setUserStatusMap({})
       }
     } catch (err) {
       console.error('Failed to sync user bookings:', err)
       setUserApplications([])
       setBookings({})
+      setUserStatusMap({})
     }
   }, [user])
 
@@ -312,7 +326,6 @@ export function Dashboard() {
     setDialogOpen(true)
   }
 
-  // 対面とオンラインを判定
   const isApplicationOnline = useCallback(
     (app: UserApplicationRecord) => {
       const exp = experiments.find((e) => e.id === app.experiment_id)
@@ -394,14 +407,13 @@ export function Dashboard() {
     }, 500)
   }
 
-  // 指定種別のタブでモーダルを開く
   const openBookingsModal = (type: BookingModalType) => {
     setBookingsModalType(type)
     setMyBookingsOpen(true)
   }
 
   return (
-    <div className="min-h-dvh bg-background text-foreground relative">
+    <div className="min-h-dvh bg-background text-foreground relative flex flex-col">
       <TopNav
         query={query}
         onQueryChange={setQuery}
@@ -411,7 +423,7 @@ export function Dashboard() {
         userName={userName}
       />
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6 flex-1 w-full">
         {/* 最上部：セッション別ダッシュボード */}
         <div className="space-y-4">
           {/* ① 学内対面実験セッション */}
@@ -720,14 +732,23 @@ export function Dashboard() {
         {/* 実験カードグリッド */}
         {visible.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {visible.map((exp) => (
-              <ExperimentCard
-                key={exp.id}
-                experiment={exp}
-                applied={exp.id in bookings}
-                onOpen={openExperiment}
-              />
-            ))}
+            {visible.map((exp) => {
+              const expId = String(exp.id)
+              const allowMultiple = Boolean((exp as any).allowMultipleSlots || (exp as any).allow_multiple_slots)
+              // 複数枠許可の場合は 'completed' にせず枠があれば通常応募可能
+              const currentStatus: ParticipationStatus = allowMultiple
+                ? (bookings[expId] ? 'applied' : 'none')
+                : (userStatusMap[expId] || 'none')
+
+              return (
+                <ExperimentCard
+                  key={exp.id}
+                  experiment={exp}
+                  status={currentStatus}
+                  onOpen={openExperiment}
+                />
+              )
+            })}
           </div>
         ) : (
           <div className="flex flex-col items-center rounded-xl border border-dashed bg-card px-6 py-16 text-center">
@@ -747,6 +768,9 @@ export function Dashboard() {
             </Button>
           </div>
         )}
+
+        {/* ボトムナビゲーションバーの高さを完全に回避するスペーサー */}
+        <div className="h-44 w-full shrink-0" aria-hidden="true" />
       </main>
 
       {/* 参加応募モーダル */}

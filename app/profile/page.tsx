@@ -37,6 +37,7 @@ import {
   Unlink,
   Loader2,
   KeyRound,
+  Send,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -62,8 +63,8 @@ type ActiveTab = 'basic' | 'history' | 'wallet' | 'settings' | 'support'
 
 interface ProfileData {
   name: string
-  realNameNative: string   // 母国語表記 (例: 慶應 太郎 / 张伟)
-  realNameEnglish: string  // 英語・ローマ字表記 (例: Taro Keio / Wei Zhang)
+  realNameNative: string
+  realNameEnglish: string
   email: string
   faculty: string
   grade: string
@@ -84,6 +85,14 @@ interface ApplicationRecord {
   applied_at: string
 }
 
+const INQUIRY_CATEGORIES = [
+  '不具合・バグの報告',
+  '実験・謝礼に関するトラブル',
+  '機能要望・改善提案',
+  '研究室導入・共同プロジェクトのご相談',
+  'その他のお問い合わせ',
+]
+
 export default function ProfilePage() {
   const router = useRouter()
   const { language, setLanguage } = useLanguage()
@@ -96,14 +105,14 @@ export default function ProfilePage() {
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
   const [keioDialogOpen, setKeioDialogOpen] = useState(false)
 
-  // ★ メールアドレス変更用ステート
+  // メールアドレス変更用ステート
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [newEmail, setNewEmail] = useState('')
   const [emailLoading, setEmailLoading] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
   const [emailSuccessMsg, setEmailSuccessMsg] = useState<string | null>(null)
 
-  // ★ パスワード再設定用ステート
+  // パスワード再設定用ステート
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -111,13 +120,21 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccessMsg, setPasswordSuccessMsg] = useState<string | null>(null)
 
+  // ★ お問い合わせモーダル用ステート
+  const [contactModalOpen, setContactModalOpen] = useState(false)
+  const [contactCategory, setContactCategory] = useState(INQUIRY_CATEGORIES[0])
+  const [contactMessage, setContactMessage] = useState('')
+  const [contactLoading, setContactLoading] = useState(false)
+  const [contactSuccess, setContactSuccess] = useState(false)
+  const [contactError, setContactError] = useState<string | null>(null)
+
   // 大学認証ステータス
   const [isAcademicVerified, setIsAcademicVerified] = useState(false)
   const [academicEmail, setAcademicEmail] = useState<string | null>(null)
   const [institutionName, setInstitutionName] = useState<string>('未認証')
   const [isUnlinking, setIsUnlinking] = useState(false)
 
-  // プロフィール情報（ゲスト用デフォルト）
+  // プロフィール情報
   const [profile, setProfile] = useState<ProfileData>({
     name: 'ゲストユーザー',
     realNameNative: '',
@@ -132,17 +149,11 @@ export default function ProfilePage() {
     itemBadgeCount: 0,
   })
 
-  // 編集用一時フォーム状態
   const [formData, setFormData] = useState<ProfileData>(profile)
-
-  // 参加履歴
   const [history, setHistory] = useState<ApplicationRecord[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
-
-  // 保存メッセージ
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
-  // Supabase Auth および user_profiles テーブル、localStorage と同期
   useEffect(() => {
     const loadProfile = async () => {
       if (user) {
@@ -155,17 +166,15 @@ export default function ProfilePage() {
           grade: '学部生',
           dominantHand: '右利き',
           vision: '裸眼',
-          laboCoins: 0, // ★ 初期値を 0 に統一
+          laboCoins: 0,
           itemPinCount: 0,
           itemBadgeCount: 0,
         }
 
-        // 🎓 大学認証ステータスの判定（3段チェック）
         let verified = false
         let verifiedAcademicEmail: string | null = null
         let verifiedInstitution = '未認証'
 
-        // 1. localStorage を即座に確認（画面のチラつき防止）
         try {
           const cachedVerified = localStorage.getItem(`academic_verified_${user.id}`)
           if (cachedVerified) {
@@ -180,7 +189,6 @@ export default function ProfilePage() {
           console.error(e)
         }
 
-        // 2. ログインメール自体のドメイン確認（最初から @keio.jp でログインした場合）
         const emailCheck = verifyAcademicEmail(user.email)
         if (emailCheck.isVerified) {
           verified = true
@@ -188,7 +196,6 @@ export default function ProfilePage() {
           verifiedInstitution = emailCheck.institutionName
         }
 
-        // 3. Supabase DB (user_profiles) を確認
         try {
           const { data, error } = await supabase
             .from('user_profiles')
@@ -205,7 +212,6 @@ export default function ProfilePage() {
             if (typeof data.item_pin_count === 'number') baseProfile.itemPinCount = data.item_pin_count
             if (typeof data.item_badge_count === 'number') baseProfile.itemBadgeCount = data.item_badge_count
 
-            // DB上の設定があれば反映
             if (data.is_academic_verified) {
               verified = true
               verifiedAcademicEmail = data.academic_email
@@ -235,7 +241,6 @@ export default function ProfilePage() {
         setAcademicEmail(verifiedAcademicEmail)
         setInstitutionName(verifiedInstitution)
 
-        // 基本属性ローカルキャッシュの読み込み
         try {
           const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
           if (cached) {
@@ -280,7 +285,6 @@ export default function ProfilePage() {
     loadProfile()
   }, [user])
 
-  // 履歴取得（ログイン時のみ実行）
   const fetchHistory = useCallback(async () => {
     if (!user) {
       setHistory([])
@@ -310,7 +314,6 @@ export default function ProfilePage() {
     }
   }, [activeTab, fetchHistory])
 
-  // プロフィール編集の開始（未ログイン時はガード）
   const handleStartEdit = () => {
     if (!user) {
       setAuthGuardOpen(true)
@@ -319,7 +322,6 @@ export default function ProfilePage() {
     setIsEditing(true)
   }
 
-  // プロフィール編集の保存
   const handleSaveProfile = async () => {
     if (!user) {
       setAuthGuardOpen(true)
@@ -365,7 +367,6 @@ export default function ProfilePage() {
     setIsEditing(false)
   }
 
-  // 大学認証成功時のコールバック
   const handleVerifiedSuccess = (verifiedEmail: string, instName: string) => {
     setIsAcademicVerified(true)
     setAcademicEmail(verifiedEmail)
@@ -386,7 +387,6 @@ export default function ProfilePage() {
     setTimeout(() => setSavedNotice(null), 3500)
   }
 
-  // 🔓 大学認証の解除処理
   const handleUnlinkAcademic = async () => {
     if (!user) return
     const confirmed = window.confirm(
@@ -425,7 +425,6 @@ export default function ProfilePage() {
     }
   }
 
-  // ★ メールアドレス変更申請処理
   const handleUpdateEmail = async () => {
     setEmailError(null)
     setEmailSuccessMsg(null)
@@ -457,7 +456,6 @@ export default function ProfilePage() {
     }
   }
 
-  // ★ パスワード再設定処理
   const handleUpdatePassword = async () => {
     setPasswordError(null)
     setPasswordSuccessMsg(null)
@@ -491,7 +489,51 @@ export default function ProfilePage() {
     }
   }
 
-  // ログアウト処理
+  // ★ お問い合わせ送信ハンドラー
+  const handleSendContact = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setContactError(null)
+
+    if (!contactMessage.trim()) {
+      setContactError('お問い合わせ内容を入力してください。')
+      return
+    }
+
+    setContactLoading(true)
+    try {
+      const targetEmail = academicEmail || profile.email
+      const targetName = profile.realNameNative
+        ? `${profile.realNameNative} (${profile.name})`
+        : profile.name
+
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.id,
+          userName: targetName,
+          userEmail: targetEmail,
+          category: contactCategory,
+          message: contactMessage.trim(),
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '送信に失敗しました。')
+
+      setContactSuccess(true)
+      setContactMessage('')
+      setTimeout(() => {
+        setContactModalOpen(false)
+        setContactSuccess(false)
+      }, 2500)
+    } catch (err: any) {
+      setContactError(err.message || '送信中にエラーが発生しました。')
+    } finally {
+      setContactLoading(false)
+    }
+  }
+
   const handleSignOut = async () => {
     if (window.confirm(isJa ? 'ログアウトしますか？' : 'Are you sure you want to log out?')) {
       await signOut()
@@ -1280,8 +1322,7 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">被験者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験・調査への参加ステップ</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-1. 「探す」から空きコマや関心のある実験・調査を検索
-<br />
+1. 「探す」から空きコマや関心のある実験・調査を検索<br />
 2. 希望の時間帯スロットを選択して応募確定<br />
 3. 当日に会場またはオンラインで参加し、謝礼を受領
                   </p>
@@ -1291,8 +1332,7 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">研究者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験募集・参加枠の管理</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-1. 「募集」タブから新規の対面実験またはアンケートを作成
-<br />
+1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
 2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
 3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
                   </p>
@@ -1371,6 +1411,32 @@ export default function ProfilePage() {
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* ★ アプリ内お問い合わせモーダルを開くボタン */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!user) {
+                        setAuthGuardOpen(true)
+                        return
+                      }
+                      setContactModalOpen(true)
+                      setContactSuccess(false)
+                      setContactError(null)
+                    }}
+                    className="p-3.5 rounded-xl border bg-primary/5 hover:bg-primary/10 border-primary/20 transition-all flex items-center gap-3 text-left w-full group"
+                  >
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:scale-105 transition-transform">
+                      <MessageSquare className="size-4" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-foreground flex items-center gap-1">
+                        <span>お問い合わせフォーム</span>
+                        <ChevronRight className="size-3 text-muted-foreground group-hover:text-foreground" />
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">アプリ内から直接運営に送信</p>
+                    </div>
+                  </button>
+
                   <a
                     href="mailto:colabo.support@gmail.com"
                     className="p-3.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center gap-3"
@@ -1379,26 +1445,8 @@ export default function ProfilePage() {
                       <Mail className="size-4" />
                     </div>
                     <div>
-                      <p className="font-bold text-foreground">運営事務局へメール</p>
+                      <p className="font-bold text-foreground">運営事務局へ直接メール</p>
                       <p className="text-[11px] text-muted-foreground font-mono">colabo.support@gmail.com</p>
-                    </div>
-                  </a>
-
-                  <a
-                    href="https://forms.gle"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-3.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center gap-3"
-                  >
-                    <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
-                      <MessageSquare className="size-4" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-foreground flex items-center gap-1">
-                        <span>Webお問い合わせフォーム</span>
-                        <ExternalLink className="size-3 text-muted-foreground" />
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">Google Formsより24時間受付</p>
                     </div>
                   </a>
                 </div>
@@ -1459,7 +1507,110 @@ export default function ProfilePage() {
         onVerifiedSuccess={handleVerifiedSuccess}
       />
 
-      {/* ★ 登録メールアドレス変更モーダル */}
+      {/* ★ お問い合わせモーダル */}
+      <Dialog open={contactModalOpen} onOpenChange={setContactModalOpen}>
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
+          <DialogHeader className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <MessageSquare className="size-4" />
+              </span>
+              <DialogTitle className="text-base font-bold text-foreground">
+                お問い合わせ・ご意見
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              ご質問や不具合報告、機能要望をお寄せください。運営チームより登録メールアドレスへ返信いたします。
+            </DialogDescription>
+          </DialogHeader>
+
+          {contactSuccess ? (
+            <div className="py-8 text-center space-y-3">
+              <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
+                <CheckCircle2 className="size-6" />
+              </div>
+              <p className="text-sm font-bold text-foreground">お問い合わせを送信しました</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                内容を確認の上、運営事務局よりご登録のメールアドレス宛てにご連絡いたします。
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleSendContact} className="space-y-4 pt-2 text-xs">
+              <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-muted/30 border text-[11px]">
+                <div>
+                  <span className="text-muted-foreground block font-medium">送信者名</span>
+                  <span className="font-bold text-foreground truncate block">
+                    {profile.realNameNative ? `${profile.realNameNative} (${profile.name})` : profile.name}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block font-medium">返信先メール</span>
+                  <span className="font-mono text-foreground truncate block">
+                    {academicEmail || profile.email}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-foreground">お問い合わせ種別 *</label>
+                <select
+                  value={contactCategory}
+                  onChange={(e) => setContactCategory(e.target.value)}
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {INQUIRY_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-foreground">お問い合わせ内容 *</label>
+                <textarea
+                  required
+                  rows={5}
+                  placeholder="不具合の発生箇所や、ご要望・ご質問の詳細をご記入ください。"
+                  value={contactMessage}
+                  onChange={(e) => setContactMessage(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background p-2.5 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                />
+              </div>
+
+              {contactError && (
+                <div className="p-2.5 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>{contactError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setContactModalOpen(false)}
+                  className="text-xs"
+                >
+                  キャンセル
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={contactLoading || !contactMessage.trim()}
+                  className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-24"
+                >
+                  {contactLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                  <span>送信する</span>
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 登録メールアドレス変更モーダル */}
       <Dialog open={emailModalOpen} onOpenChange={setEmailModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader className="space-y-2">
@@ -1534,7 +1685,7 @@ export default function ProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* ★ パスワード再設定モーダル */}
+      {/* パスワード再設定モーダル */}
       <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader className="space-y-2">
