@@ -28,7 +28,8 @@ import {
   CircleDollarSign,
   AlertTriangle,
   ExternalLink,
-  Key,
+  HeartHandshake,
+  BookmarkCheck,
 } from 'lucide-react'
 import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
@@ -57,14 +58,12 @@ export function ExperimentDialog({
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [appliedSuccess, setAppliedSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('応募が完了しました！')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   // ユーザーの既存予約・応募状況
   const [userBookedSlots, setUserBookedSlots] = useState<{ id?: string; time?: string; status?: string }[]>([])
   const [existingOnlineApp, setExistingOnlineApp] = useState<any | null>(null)
-
-  // オンライン調査用：入力された完了コード
-  const [inputCompletionCode, setInputCompletionCode] = useState('')
 
   // 本名ステート
   const [realNameNative, setRealNameNative] = useState('')
@@ -83,7 +82,7 @@ export function ExperimentDialog({
       try {
         const { data, error } = await supabase
           .from('applications')
-          .select('id, slot_id, slot_time, status')
+          .select('id, slot_id, slot_time, status, applied_at')
           .eq('experiment_id', experiment.id)
           .or(`applicant_id.eq.${user.id},applicant_email.eq.${user.email}`)
           .neq('status', 'キャンセル済み')
@@ -182,7 +181,6 @@ export function ExperimentDialog({
       setSelectedSlotId(null)
       setErrorMessage(null)
       setAppliedSuccess(false)
-      setInputCompletionCode('')
     }
   }, [open])
 
@@ -198,25 +196,29 @@ export function ExperimentDialog({
   )
 
   const surveyUrl = expAny.survey_url || expAny.surveyUrl
-  const expectedCode = expAny.completion_code || expAny.completionCode
+  const expiryHours = Number(expAny.expiry_hours || expAny.expiryHours || 24)
 
   const allowMultipleSlots = Boolean(expAny.allow_multiple_slots || expAny.allowMultipleSlots)
 
-  // オンラインで既に提出・照合が完了しているか
-  const isOnlineAlreadyCompleted = Boolean(
-    existingOnlineApp && (existingOnlineApp.status?.includes('回答完了') || existingOnlineApp.status?.includes('完了'))
+  // オンライン：既に枠を確保（エントリー）しているか
+  const isOnlineReserved = Boolean(
+    existingOnlineApp && (existingOnlineApp.status === '確定' || existingOnlineApp.status?.includes('回答中'))
+  )
+  // オンライン：既に提出まで完了しているか
+  const isOnlineCompleted = Boolean(
+    existingOnlineApp && (existingOnlineApp.status?.includes('回答完了') || existingOnlineApp.status === '完了')
   )
 
   // 対面実験で予約済みがあるか
   const hasInPersonBooking = userBookedSlots.length > 0 && !isOnline
   const isBlockedBySingleSlotRule = !allowMultipleSlots && hasInPersonBooking
-  const isBlockedOnline = !allowMultipleSlots && isOnlineAlreadyCompleted
+  const isBlockedOnline = !allowMultipleSlots && isOnlineCompleted
 
   // 慶應認証バッジ限定判定
   const requiresKeioBadge = Boolean(expAny.requires_keio_badge || expAny.requiresKeioBadge)
   const isBlockedByKeioRule = !loadingProfile && requiresKeioBadge && !isKeioVerified
 
-  // 応募・提出実行
+  // 応募・枠確保・完了処理
   const handleApply = async () => {
     setErrorMessage(null)
 
@@ -233,7 +235,7 @@ export function ExperimentDialog({
     if (isBlockedBySingleSlotRule || isBlockedOnline) {
       setErrorMessage(
         isOnline
-          ? 'このアンケートは1人1回限定です。すでに回答完了しています。'
+          ? 'このアンケートは1人1回限定です。すでに回答を完了しています。'
           : 'この実験は1人1枠限定のため、追加応募はできません。'
       )
       return
@@ -242,24 +244,10 @@ export function ExperimentDialog({
     const cleanNative = realNameNative.trim()
     const cleanEnglish = realNameEnglish.trim()
     if (!cleanNative || !cleanEnglish) {
-      setErrorMessage('研究倫理および出席・謝礼受領確認のため、本名（母国語・英語）の入力が必須です。')
+      setErrorMessage('研究倫理および名簿確認のため、本名（母国語・英語）の入力が必須です。')
       return
     }
 
-    // オンラインの場合のコード検証
-    if (isOnline && expectedCode) {
-      const cleanInput = inputCompletionCode.trim()
-      if (!cleanInput) {
-        setErrorMessage('フォーム回答後に表示される「回答完了コード」を入力してください。')
-        return
-      }
-      if (cleanInput.toLowerCase() !== String(expectedCode).trim().toLowerCase()) {
-        setErrorMessage('入力された完了コードが一致しません。フォーム送信完了画面のコードを正しく入力してください。')
-        return
-      }
-    }
-
-    // 対面の場合のスロット選択チェック
     if (!isOnline && experiment.slots && experiment.slots.length > 0 && !selectedSlotId) {
       setErrorMessage('参加希望の日時枠を選択してください。')
       return
@@ -284,29 +272,12 @@ export function ExperimentDialog({
       const selectedSlot = experiment.slots?.find((s) => String(s.id) === String(selectedSlotId))
       const slotTimeText = isOnline ? 'オンライン回答' : (selectedSlot?.time || '日時指定なし')
 
-      const applyPayload: any = {
-        experiment_id: experiment.id,
-        experiment_title: experiment.title,
-        applicant_email: user.email,
-        applicant_name: cleanNative,
-        applicant_name_native: cleanNative,
-        applicant_name_english: cleanEnglish,
-        slot_id: isOnline ? 'online_survey' : selectedSlotId,
-        slot_time: slotTimeText,
-        format: isOnline ? 'オンライン' : '対面',
-        status: isOnline ? '回答完了（謝礼確定）' : '確定',
-        applied_at: new Date().toISOString(),
-      }
-
-      if (user.id) {
-        applyPayload.applicant_id = user.id
-      }
-
-      if (isOnline && existingOnlineApp) {
+      // オンラインで枠確保済み ➔ 回答完了を記録
+      if (isOnline && isOnlineReserved && existingOnlineApp) {
         const { error: updateErr } = await supabase
           .from('applications')
           .update({
-            status: '回答完了（謝礼確定）',
+            status: '回答完了',
             applicant_name: cleanNative,
             applicant_name_native: cleanNative,
             applicant_name_english: cleanEnglish,
@@ -314,7 +285,29 @@ export function ExperimentDialog({
           .eq('id', existingOnlineApp.id)
 
         if (updateErr) throw updateErr
+
+        setSuccessMessage('アンケート回答の提出を記録しました！マイページの履歴に保存されました。')
       } else {
+        // 新規エントリー（対面応募、またはオンラインの枠確保）
+        const nextStatus = isOnline ? '確定' : '確定'
+        const applyPayload: any = {
+          experiment_id: experiment.id,
+          experiment_title: experiment.title,
+          applicant_email: user.email,
+          applicant_name: cleanNative,
+          applicant_name_native: cleanNative,
+          applicant_name_english: cleanEnglish,
+          slot_id: isOnline ? 'online_survey' : selectedSlotId,
+          slot_time: slotTimeText,
+          format: isOnline ? 'オンライン' : '対面',
+          status: nextStatus,
+          applied_at: new Date().toISOString(),
+        }
+
+        if (user.id) {
+          applyPayload.applicant_id = user.id
+        }
+
         const { error: applyError } = await supabase.from('applications').insert(applyPayload)
 
         if (applyError) {
@@ -326,10 +319,8 @@ export function ExperimentDialog({
             throw applyError
           }
         }
-      }
 
-      // 対面の場合は枠数を減算
-      if (!isOnline) {
+        // DBの全体枠数を減算（対面・オンライン問わず仮押さえ時点で 1 枠減算）
         try {
           const { data: currentDbExp, error: fetchErr } = await supabase
             .from('experiments')
@@ -348,8 +339,7 @@ export function ExperimentDialog({
             }
             let updatedSlots = Array.isArray(dbSlots) ? [...dbSlots] : []
 
-            // ★ 修正箇所：slot.id の完全一致のみで照合（同名スロットの一括減算を防止）
-            if (updatedSlots.length > 0 && selectedSlotId) {
+            if (!isOnline && updatedSlots.length > 0 && selectedSlotId) {
               updatedSlots = updatedSlots.map((slot: any) => {
                 if (String(slot.id) === String(selectedSlotId)) {
                   const currentBooked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
@@ -369,6 +359,12 @@ export function ExperimentDialog({
           }
         } catch (slotUpdateErr) {
           console.warn('DB update catch:', slotUpdateErr)
+        }
+
+        if (isOnline) {
+          setSuccessMessage('回答枠を確保しました！ダッシュボードの回答予定セッションから回答を進めてください。')
+        } else {
+          setSuccessMessage('応募が完了しました！')
         }
       }
 
@@ -398,17 +394,18 @@ export function ExperimentDialog({
   const rewardType = expAny.rewardType || expAny.reward_type || (expAny.reward?.includes('¥') ? '現金' : '謝礼あり')
   const rawAmount = typeof expAny.rewardAmount === 'number' ? expAny.rewardAmount : (Number(expAny.reward_amount) || 0)
 
-  const typeDisplay =
-    rewardType === '謝礼なし'
-      ? '謝礼なし'
-      : rewardType.includes('Amazon')
-      ? 'Amazonギフト券'
-      : rewardType.includes('現金')
-      ? '現金（手渡し）'
-      : rewardType || 'その他'
+  const typeDisplay = isOnline
+    ? '学内協力（謝礼なし）'
+    : rewardType === '謝礼なし'
+    ? '謝礼なし'
+    : rewardType.includes('Amazon')
+    ? 'Amazonギフト券'
+    : rewardType.includes('現金')
+    ? '現金（手渡し）'
+    : rewardType || 'その他'
 
   let valueDisplay = ''
-  if (rewardType === '謝礼なし') {
+  if (isOnline || rewardType === '謝礼なし') {
     valueDisplay = 'なし (0円)'
   } else if (rawAmount > 0) {
     valueDisplay = `¥${rawAmount.toLocaleString()}`
@@ -464,12 +461,7 @@ export function ExperimentDialog({
             <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
               <CheckCircle2 className="size-8" />
             </div>
-            <p className="text-base font-bold text-foreground">
-              {isOnline ? '回答確認 & 謝礼受取が完了しました！' : '応募が完了しました！'}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              マイページの「参加履歴」から受領内容を確認できます。
-            </p>
+            <p className="text-base font-bold text-foreground">{successMessage}</p>
           </div>
         ) : (
           <div className="space-y-5 pt-2">
@@ -477,7 +469,11 @@ export function ExperimentDialog({
             <div className="grid grid-cols-2 gap-2.5 p-3.5 rounded-xl bg-muted/30 border text-xs">
               <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
-                  <Gift className="size-3.5 text-rose-500" />
+                  {isOnline ? (
+                    <HeartHandshake className="size-3.5 text-primary" />
+                  ) : (
+                    <Gift className="size-3.5 text-rose-500" />
+                  )}
                   <span>謝礼内容（種別）</span>
                 </span>
                 <p className="font-bold text-foreground text-sm truncate" title={typeDisplay}>
@@ -488,7 +484,7 @@ export function ExperimentDialog({
               <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
                   <CircleDollarSign className="size-3.5 text-emerald-500" />
-                  <span>謝礼金額 / 詳細</span>
+                  <span>謝礼金額 / 条件</span>
                 </span>
                 <p className="font-bold text-emerald-600 dark:text-emerald-400 text-sm truncate" title={valueDisplay}>
                   {valueDisplay}
@@ -538,7 +534,7 @@ export function ExperimentDialog({
                 <AlertTriangle className="size-4 shrink-0" />
                 <span>
                   {isOnline
-                    ? 'このアンケートは「1人1回限定」です。既に回答・提出済みのため、追加回答はできません。'
+                    ? 'このアンケートは「1人1回限定」です。既に提出済みのため、追加回答はできません。'
                     : 'この実験は「1人1枠限定」です。既に予約済みのスロットがあるため、追加応募はできません。'}
                 </span>
               </div>
@@ -546,65 +542,59 @@ export function ExperimentDialog({
 
             {/* オンライン調査ステップ */}
             {isOnline ? (
-              <div className="space-y-4 p-4 rounded-xl border bg-card/70">
+              <div className="space-y-3.5 p-4 rounded-xl border bg-card/70">
                 <div className="flex items-center justify-between border-b pb-2.5">
                   <div className="space-y-0.5">
                     <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
                       <Globe2 className="size-4 text-primary" />
-                      <span>オンライン回答・照合ステップ</span>
+                      <span>{isOnlineReserved ? '回答を進める' : 'オンライン回答への参加エントリー'}</span>
                     </h3>
                     <p className="text-[11px] text-muted-foreground">
-                      外部フォームを開いて回答後、送信完了画面に表示されるコードを入力してください。
+                      {isOnlineReserved
+                        ? '枠を確保済みです。回答完了後に下の完了ボタンを押してください。'
+                        : 'まず枠を確保（仮押さえ）します。回答中に他の人に枠を取られる心配はありません。'}
                     </p>
                   </div>
-                  {allowMultipleSlots && (
-                    <Badge variant="secondary" className="text-[10px] text-primary">
-                      複数回回答可能
+                  {expiryHours > 0 && (
+                    <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30 font-semibold">
+                      有効期限: {expiryHours}時間以内
                     </Badge>
                   )}
                 </div>
 
-                <div className="p-3.5 rounded-xl border bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="space-y-0.5">
-                    <p className="text-xs font-bold text-foreground">回答フォーム（Google Forms等）</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      別タブで開きます。完了画面のコードを控えてこちらに戻ってください。
+                {isOnlineReserved ? (
+                  <div className="space-y-3">
+                    <div className="p-3.5 rounded-xl border bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-foreground">回答フォームを開く</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Google Forms等で回答を完了させてください（別タブ）。
+                        </p>
+                      </div>
+                      {surveyUrl && (
+                        <Button
+                          size="sm"
+                          onClick={() => window.open(surveyUrl, '_blank', 'noopener,noreferrer')}
+                          className="h-8 text-xs font-bold gap-1.5 bg-primary text-primary-foreground shrink-0 self-start sm:self-auto"
+                        >
+                          <ExternalLink className="size-3.5" />
+                          <span>フォームを開く</span>
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="p-3 rounded-lg border bg-muted/20 text-[11px] text-muted-foreground leading-relaxed">
+                      回答送信後、下部の「回答完了を記録する」ボタンを押すとマイページの履歴に移動します。
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 flex items-start gap-2.5 text-xs">
+                    <BookmarkCheck className="size-4 text-primary shrink-0 mt-0.5" />
+                    <p className="text-muted-foreground leading-relaxed text-[11px]">
+                      「枠を確保して参加する」を押すと、あなたの回答枠が直ちに1枠キープされます。確保後は設定された期限内（{expiryHours}時間以内）にダッシュボードからいつでも落ち着いて回答できます。
                     </p>
                   </div>
-                  {surveyUrl ? (
-                    <Button
-                      size="sm"
-                      onClick={() => window.open(surveyUrl, '_blank', 'noopener,noreferrer')}
-                      className="h-8 text-xs font-bold gap-1.5 bg-primary text-primary-foreground shrink-0 self-start sm:self-auto"
-                    >
-                      <ExternalLink className="size-3.5" />
-                      <span>フォームを開く</span>
-                    </Button>
-                  ) : (
-                    <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/30">
-                      URL未設定
-                    </Badge>
-                  )}
-                </div>
-
-                <div className="space-y-1.5 pt-1">
-                  <Label htmlFor="completionCode" className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                    <Key className="size-3.5 text-primary" />
-                    <span>回答完了コード {expectedCode ? '*' : '（任意）'}</span>
-                  </Label>
-                  <Input
-                    id="completionCode"
-                    type="text"
-                    disabled={isBlockedOnline}
-                    placeholder="例: FORM-2026-XYZ"
-                    value={inputCompletionCode}
-                    onChange={(e) => setInputCompletionCode(e.target.value)}
-                    className="text-xs font-mono"
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    ※ フォーム送信完了画面に表示された照合コードを入力してください。照合完了と同時に謝礼受取が確定します。
-                  </p>
-                </div>
+                )}
               </div>
             ) : (
               /* 対面実験専用：スロット選択 */
@@ -629,7 +619,6 @@ export function ExperimentDialog({
                       const isFull = booked >= capacity
                       const remainingInSlot = Math.max(0, capacity - booked)
 
-                      // ★ 修正箇所：slot.id を最優先で厳格に判定（同名スロットの誤判定を防止）
                       const isAlreadyBookedByMe = userBookedSlots.some((b) => {
                         if (b.id && slot.id) {
                           return String(b.id) === String(slot.id)
@@ -692,7 +681,7 @@ export function ExperimentDialog({
               <p className="text-[11px] text-muted-foreground leading-relaxed flex items-start gap-1.5">
                 <Lock className="size-3.5 shrink-0 mt-0.5 text-muted-foreground" />
                 <span>
-                  本名は研究室・実験主催者の出席名簿および謝礼受領確認にのみ使用され、一般に公開されることはありません。
+                  本名は研究室・実験主催者の出席名簿確認にのみ使用され、一般に公開されることはありません。
                 </span>
               </p>
 
@@ -761,8 +750,7 @@ export function ExperimentDialog({
                   isBlockedOnline ||
                   !realNameNative.trim() ||
                   !realNameEnglish.trim() ||
-                  (!isOnline && Boolean(experiment.slots?.length) && !selectedSlotId) ||
-                  (isOnline && Boolean(expectedCode) && !inputCompletionCode.trim())
+                  (!isOnline && Boolean(experiment.slots?.length) && !selectedSlotId)
                 }
                 onClick={handleApply}
                 className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-32"
@@ -772,11 +760,13 @@ export function ExperimentDialog({
                   {isBlockedByKeioRule
                     ? '慶應認証バッジが必要です'
                     : isBlockedOnline
-                    ? '回答上限に達しています'
+                    ? '提出済みです'
                     : isBlockedBySingleSlotRule
                     ? '応募上限に達しています'
                     : isOnline
-                    ? '照合して謝礼を確定'
+                    ? isOnlineReserved
+                      ? '回答完了を記録する'
+                      : '枠を確保して参加する'
                     : '応募を確定する'}
                 </span>
               </Button>

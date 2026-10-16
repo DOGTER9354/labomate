@@ -24,6 +24,8 @@ import {
   Layers,
   ShieldCheck,
   Edit3,
+  Clock,
+  HeartHandshake,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -40,6 +42,19 @@ const REWARD_OPTIONS = [
   'Amazonギフト券',
   'その他',
   '謝礼なし',
+]
+
+// ★ 1時間・3時間・6時間などの短い選択肢を追加
+const EXPIRY_OPTIONS = [
+  { value: '1', label: '1時間以内（超急募・即回答）' },
+  { value: '3', label: '3時間以内（即日急募）' },
+  { value: '6', label: '6時間以内（当日中）' },
+  { value: '12', label: '12時間以内（半日以内）' },
+  { value: '24', label: '24時間（1日以内・標準）' },
+  { value: '48', label: '48時間（2日以内）' },
+  { value: '72', label: '72時間（3日以内）' },
+  { value: '168', label: '1週間以内' },
+  { value: '0', label: '期限なし（無制限）' },
 ]
 
 export function CreateExperimentDialog({
@@ -64,6 +79,7 @@ export function CreateExperimentDialog({
   const [rewardAmount, setRewardAmount] = useState('1000')
   const [description, setDescription] = useState('')
   const [surveyUrl, setSurveyUrl] = useState('')
+  const [expiryHours, setExpiryHours] = useState('24')
 
   // 複数参加・複数回回答の許可設定（対面・オンライン共通）
   const [allowMultipleSlots, setAllowMultipleSlots] = useState<boolean>(false)
@@ -105,6 +121,7 @@ export function CreateExperimentDialog({
       setRewardAmount(String(initialData.reward_amount ?? '1000'))
       setDescription(initialData.description || '')
       setSurveyUrl(initialData.survey_url || '')
+      setExpiryHours(String(initialData.expiry_hours ?? 24))
       setAllowMultipleSlots(Boolean(initialData.allow_multiple_slots))
       setRequiresKeioBadge(
         initialData.requires_keio_badge !== undefined
@@ -146,6 +163,7 @@ export function CreateExperimentDialog({
       setRewardAmount('1000')
       setDescription('')
       setSurveyUrl('')
+      setExpiryHours('24')
       setAllowMultipleSlots(false)
       setRequiresKeioBadge(true)
       setSlots([
@@ -210,13 +228,12 @@ export function CreateExperimentDialog({
       return
     }
 
-    // ★ オンラインアンケートの回答URL必須チェック
     if (mode === 'online' && !surveyUrl.trim()) {
       setErrorMsg('オンラインアンケートの回答URL（Google Forms等）を入力してください。')
       return
     }
 
-    if (rewardType === 'その他' && !customRewardType.trim()) {
+    if (mode === 'in-person' && rewardType === 'その他' && !customRewardType.trim()) {
       setErrorMsg('謝礼種別で「その他」を選択した場合は、謝礼の詳細を入力してください。')
       return
     }
@@ -230,13 +247,16 @@ export function CreateExperimentDialog({
 
     try {
       const finalRewardType =
-        rewardType === 'その他'
+        mode === 'online'
+          ? '謝礼なし（学内協力・ボランティア）'
+          : rewardType === 'その他'
           ? customRewardType.trim() || 'その他'
           : rewardType
 
-      const finalRewardAmount = isAmountDisabled
-        ? 0
-        : parseInt(rewardAmount) || 0
+      const finalRewardAmount =
+        mode === 'online' || isAmountDisabled
+          ? 0
+          : parseInt(rewardAmount) || 0
 
       const originalSlots: any[] = Array.isArray(initialData?.slots)
         ? initialData.slots
@@ -265,6 +285,7 @@ export function CreateExperimentDialog({
         reward_type: finalRewardType,
         description: description.trim(),
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
+        expiry_hours: mode === 'online' ? parseInt(expiryHours) || 24 : null,
         spots_total: totalSpots,
         allow_multiple_slots: allowMultipleSlots,
         requires_keio_badge: requiresKeioBadge,
@@ -414,61 +435,112 @@ export function CreateExperimentDialog({
             )}
           </div>
 
-          {/* 所要時間 & 謝礼種別 & 謝礼金額 */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="space-y-1.5">
-              <Label className="text-muted-foreground font-medium">所要時間（分）</Label>
-              <Input
-                type="number"
-                min="5"
-                value={durationMins}
-                onChange={(e) => setDurationMins(e.target.value)}
-                className="text-xs"
-              />
-            </div>
+          {/* オンラインアンケート用：謝礼なし案内 ＆ 回答有効期限設定 */}
+          {mode === 'online' ? (
+            <div className="space-y-3">
+              <div className="p-3 rounded-xl border bg-muted/20 flex items-start gap-2.5 text-xs">
+                <HeartHandshake className="size-4 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-foreground">オンライン回答の謝礼について</p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    公費・研究費の監査および規程に準拠するため、オンライン調査は「学内協力・ボランティア型（謝礼なし）」として募集されます。
+                  </p>
+                </div>
+              </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-muted-foreground font-medium">謝礼種別</Label>
-              <select
-                value={rewardType}
-                onChange={(e) => setRewardType(e.target.value)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                {REWARD_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="space-y-1.5">
+                  <Label className="text-muted-foreground font-medium">目安所要時間（分）</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={durationMins}
+                    onChange={(e) => setDurationMins(e.target.value)}
+                    className="text-xs"
+                  />
+                </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-muted-foreground font-medium">
-                謝礼金額（円）{isAmountDisabled && <span className="text-[10px] text-muted-foreground font-normal">（不要）</span>}
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                disabled={isAmountDisabled}
-                value={isAmountDisabled ? '0' : rewardAmount}
-                onChange={(e) => setRewardAmount(e.target.value)}
-                className="text-xs disabled:opacity-40 disabled:bg-muted/40"
-              />
+                <div className="space-y-1.5">
+                  <Label className="font-bold text-foreground flex items-center gap-1">
+                    <Clock className="size-3.5 text-primary" />
+                    <span>回答の有効期限（自動失効時間）</span>
+                  </Label>
+                  <select
+                    value={expiryHours}
+                    onChange={(e) => setExpiryHours(e.target.value)}
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {EXPIRY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground">
+                    ※ 枠確保後この時間を過ぎても未回答の場合、自動で枠が全体に返却されます。
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* 学内対面実験用：所要時間 & 謝礼種別 & 謝礼金額 */
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="space-y-1.5">
+                  <Label className="text-muted-foreground font-medium">所要時間（分）</Label>
+                  <Input
+                    type="number"
+                    min="5"
+                    value={durationMins}
+                    onChange={(e) => setDurationMins(e.target.value)}
+                    className="text-xs"
+                  />
+                </div>
 
-          {rewardType === 'その他' && (
-            <div className="space-y-1.5 text-xs animate-in fade-in duration-200">
-              <Label className="font-bold text-foreground">
-                謝礼の詳細（その他） *
-              </Label>
-              <Input
-                required
-                placeholder="例: 図書カード1,000円分 / 特製ノベルティ・記念品 / カフェチケット"
-                value={customRewardType}
-                onChange={(e) => setCustomRewardType(e.target.value)}
-                className="text-xs"
-              />
+                <div className="space-y-1.5">
+                  <Label className="text-muted-foreground font-medium">謝礼種別</Label>
+                  <select
+                    value={rewardType}
+                    onChange={(e) => setRewardType(e.target.value)}
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {REWARD_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-muted-foreground font-medium">
+                    謝礼金額（円）{isAmountDisabled && <span className="text-[10px] text-muted-foreground font-normal">（不要）</span>}
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    disabled={isAmountDisabled}
+                    value={isAmountDisabled ? '0' : rewardAmount}
+                    onChange={(e) => setRewardAmount(e.target.value)}
+                    className="text-xs disabled:opacity-40 disabled:bg-muted/40"
+                  />
+                </div>
+              </div>
+
+              {rewardType === 'その他' && (
+                <div className="space-y-1.5 text-xs animate-in fade-in duration-200">
+                  <Label className="font-bold text-foreground">
+                    謝礼の詳細（その他） *
+                  </Label>
+                  <Input
+                    required
+                    placeholder="例: 図書カード1,000円分 / 特製ノベルティ・記念品 / カフェチケット"
+                    value={customRewardType}
+                    onChange={(e) => setCustomRewardType(e.target.value)}
+                    className="text-xs"
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -506,14 +578,14 @@ export function CreateExperimentDialog({
                 </p>
                 <p className="text-[11px] text-muted-foreground leading-snug">
                   {allowMultipleSlots
-                    ? '1人の被験者が複数回アンケートに回答・完了コードを提出できます（反復・定期調査向け）'
+                    ? '1人の被験者が複数回アンケートに回答・提出できます（反復・定期調査向け）'
                     : '1人の被験者は1回しか回答・提出できません（一般的な認知・心理・意識調査向け）'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setAllowMultipleSlots((prev) => !prev)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all shrink-0 ${
                   allowMultipleSlots
                     ? 'bg-primary text-primary-foreground border-primary shadow-xs'
                     : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
@@ -589,7 +661,6 @@ export function CreateExperimentDialog({
                 </Button>
               </div>
 
-              {/* 対面実験用：複数スロット参加の許可設定スイッチ */}
               <div className="p-3 rounded-xl border bg-card/60 flex items-start justify-between gap-3 text-xs">
                 <div className="space-y-0.5">
                   <p className="font-bold text-foreground flex items-center gap-1.5">

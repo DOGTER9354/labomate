@@ -1,6 +1,6 @@
 'use client'
 
-import { MyBookingsDialog } from '@/components/labomate/my-bookings-dialog'
+import { MyBookingsDialog, type BookingModalType } from '@/components/labomate/my-bookings-dialog'
 import { useLanguage } from '@/lib/language-context'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -16,6 +16,8 @@ import {
   Calendar,
   RefreshCw,
   ShieldCheck,
+  FileText,
+  HeartHandshake,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -61,23 +63,19 @@ export function Dashboard() {
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+
+  // モーダル開閉ステート ＆ 開く種別（'in-person' | 'online'）
   const [myBookingsOpen, setMyBookingsOpen] = useState(false)
+  const [bookingsModalType, setBookingsModalType] = useState<BookingModalType>('in-person')
 
-  // 🔃 リロード処理中ステート
   const [isRefreshing, setIsRefreshing] = useState(false)
-
-  // 予約済みの実験IDとスロット情報のマップ (expId -> slotId)
   const [bookings, setBookings] = useState<Record<string, string>>({})
-  // ユーザーの応募レコード一覧（直近セッション特定用）
   const [userApplications, setUserApplications] = useState<UserApplicationRecord[]>([])
 
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [userName, setUserName] = useState('周誠')
-
-  // 応募完了通知用トースト状態
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
-  // 保存済みプロフィールから名前を読み込み
   useEffect(() => {
     const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
     if (cached) {
@@ -90,7 +88,6 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabase からユーザー自身の予約履歴を同期取得（ログインユーザー基準）
   const fetchUserBookings = useCallback(async () => {
     if (!user) {
       setUserApplications([])
@@ -108,7 +105,6 @@ export function Dashboard() {
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        // ★ 回答完了・終了済みのものはアクティブ予定から除外（マイページの履歴へ）
         const activeApps = data.filter(
           (a) => !a.status?.includes('回答完了') && a.status !== '完了'
         )
@@ -131,7 +127,6 @@ export function Dashboard() {
     }
   }, [user])
 
-  // Supabaseから最新データを取得
   const fetchExperiments = useCallback(async () => {
     try {
       const [{ data: expData, error: expError }, { data: appData }] = await Promise.all([
@@ -183,7 +178,6 @@ export function Dashboard() {
           )
           const totalBookedCount = expApps.length
 
-          // ★ 修正箇所：slot_id の厳格一致のみで各スロットの予約数をカウント
           const updatedSlots = parsedSlots.map((slot: any) => {
             const slotAppsCount = expApps.filter(
               (a) => a.slot_id && String(a.slot_id) === String(slot.id)
@@ -195,11 +189,12 @@ export function Dashboard() {
             }
           })
 
-          const rewardText =
-            item.reward ||
-            (Number(item.reward_amount) > 0
-              ? `${item.reward_type ? `${item.reward_type} ` : ''}${formatYen(Number(item.reward_amount))}`
-              : item.reward_type || '謝礼なし')
+          const rewardText = isOnline
+            ? '学内協力（謝礼なし）'
+            : item.reward ||
+              (Number(item.reward_amount) > 0
+                ? `${item.reward_type ? `${item.reward_type} ` : ''}${formatYen(Number(item.reward_amount))}`
+                : item.reward_type || '謝礼なし')
 
           const slotsCapacitySum = updatedSlots.reduce(
             (acc, cur) => acc + (Number(cur.capacity) || 0),
@@ -223,8 +218,8 @@ export function Dashboard() {
             location: item.location || (isOnline ? 'オンライン（Webアンケート）' : 'SFC オミクロン館'),
             mode: isOnline ? 'online' : 'in-person',
             durationMins: Number(item.duration_mins) || parseInt(item.duration) || 30,
-            rewardAmount: Number(item.reward_amount) || 0,
-            rewardType: item.reward_type || 'Amazonギフト券',
+            rewardAmount: isOnline ? 0 : Number(item.reward_amount) || 0,
+            rewardType: isOnline ? '謝礼なし' : item.reward_type || 'Amazonギフト券',
             reward: rewardText,
             spotsLeft: calculatedSpotsLeft,
             spotsTotal: Math.max(1, spotsTotalVal),
@@ -242,7 +237,7 @@ export function Dashboard() {
             description: item.description || '',
             ethicsId: item.ethics_id || 'ETH-2026-PENDING',
             surveyUrl: item.survey_url || undefined,
-            completionCode: item.completion_code || undefined,
+            expiryHours: Number(item.expiry_hours || 24),
             slots: updatedSlots,
           } as any
         })
@@ -317,12 +312,39 @@ export function Dashboard() {
     setDialogOpen(true)
   }
 
-  const nextBooking = userApplications.length > 0 ? userApplications[0] : null
-  const nextExperiment = nextBooking
-    ? experiments.find((e) => e.id === nextBooking.experiment_id)
+  // 対面とオンラインを判定
+  const isApplicationOnline = useCallback(
+    (app: UserApplicationRecord) => {
+      const exp = experiments.find((e) => e.id === app.experiment_id)
+      return Boolean(
+        app.format?.includes('オンライン') ||
+        app.slot_id === 'online_survey' ||
+        app.slot_time?.includes('オンライン') ||
+        exp?.mode === 'online' ||
+        Boolean(exp?.surveyUrl)
+      )
+    },
+    [experiments]
+  )
+
+  const inPersonBookings = useMemo(() => {
+    return userApplications.filter((a) => !isApplicationOnline(a))
+  }, [userApplications, isApplicationOnline])
+
+  const onlineReservedBookings = useMemo(() => {
+    return userApplications.filter((a) => isApplicationOnline(a))
+  }, [userApplications, isApplicationOnline])
+
+  const nextInPersonBooking = inPersonBookings.length > 0 ? inPersonBookings[0] : null
+  const nextInPersonExperiment = nextInPersonBooking
+    ? experiments.find((e) => e.id === nextInPersonBooking.experiment_id)
     : null
 
-  // 実験応募確定処理
+  const nextOnlineBooking = onlineReservedBookings.length > 0 ? onlineReservedBookings[0] : null
+  const nextOnlineExperiment = nextOnlineBooking
+    ? experiments.find((e) => e.id === nextOnlineBooking.experiment_id)
+    : null
+
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
 
@@ -340,7 +362,6 @@ export function Dashboard() {
           }
           let newSlots = Array.isArray(rawSlots) ? [...rawSlots] : []
           if (newSlots.length > 0) {
-            // ★ slot.id の一致する枠のみ bookedCount をインクリメント
             newSlots = newSlots.map((s: any) => {
               if (String(s.id) === String(slotId)) {
                 const booked = Number(s.bookedCount ?? 0)
@@ -361,9 +382,7 @@ export function Dashboard() {
       })
     )
 
-    const message = isJa
-      ? '参加予約が完了しました！マイページから予約内容を確認できます。'
-      : 'Booking confirmed! Check details in your My Page.'
+    const message = isJa ? '参加登録が完了しました！' : 'Participation confirmed!'
     setToastMessage(message)
     setTimeout(() => {
       setToastMessage(null)
@@ -373,6 +392,12 @@ export function Dashboard() {
       fetchUserBookings()
       fetchExperiments()
     }, 500)
+  }
+
+  // 指定種別のタブでモーダルを開く
+  const openBookingsModal = (type: BookingModalType) => {
+    setBookingsModalType(type)
+    setMyBookingsOpen(true)
   }
 
   return (
@@ -387,101 +412,189 @@ export function Dashboard() {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6">
-        {/* 最上部：被験者アクティブ・ダッシュボード */}
-        {nextBooking ? (
-          <section
-            aria-label="Your Next Session"
-            className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card p-4 sm:p-5 shadow-xs transition-all"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
-              <div className="flex items-center gap-2">
-                <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <CalendarCheck className="size-4" />
-                </span>
-                <span className="text-xs font-bold text-foreground">
-                  {isJa ? '次の参加予定セッション' : 'Your Next Session'}
-                </span>
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1.5 py-0 bg-background/80 text-emerald-600 border-emerald-500/30 font-semibold"
+        {/* 最上部：セッション別ダッシュボード */}
+        <div className="space-y-4">
+          {/* ① 学内対面実験セッション */}
+          {nextInPersonBooking ? (
+            <section
+              aria-label="Your Next In-Person Session"
+              className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card p-4 sm:p-5 shadow-xs transition-all"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <CalendarCheck className="size-4" />
+                  </span>
+                  <span className="text-xs font-bold text-foreground">
+                    {isJa ? '次の対面参加セッション' : 'Next In-Person Session'}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1.5 py-0 bg-background/80 text-emerald-600 border-emerald-500/30 font-semibold"
+                  >
+                    {nextInPersonBooking.status || '確定'}
+                  </Badge>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => openBookingsModal('in-person')}
+                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1 self-start sm:self-auto"
                 >
-                  {nextBooking.status || '確定'}
-                </Badge>
+                  <span>{isJa ? `対面予定（全${inPersonBookings.length}件）を確認` : `View all (${inPersonBookings.length})`}</span>
+                  <ArrowRight className="size-3.5" />
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setMyBookingsOpen(true)}
-                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 self-start sm:self-auto"
-              >
-                <span>{isJa ? `参加予定（全${userApplications.length}件）を確認` : `View all (${userApplications.length})`}</span>
-                <ArrowRight className="size-3.5" />
-              </button>
-            </div>
+              <div className="pt-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5 min-w-0">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug truncate">
+                    {nextInPersonBooking.experiment_title || nextInPersonExperiment?.title || '実験セッション'}
+                  </h2>
 
-            <div className="pt-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1.5 min-w-0">
-                <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug truncate">
-                  {nextBooking.experiment_title || nextExperiment?.title || '実験セッション'}
-                </h2>
-
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {nextBooking.slot_time && (
-                    <span className="flex items-center gap-1 text-foreground font-semibold">
-                      <Clock className="size-3.5 text-primary" />
-                      <span>{nextBooking.slot_time}</span>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {nextInPersonBooking.slot_time && (
+                      <span className="flex items-center gap-1 text-foreground font-semibold">
+                        <Clock className="size-3.5 text-primary" />
+                        <span>{nextInPersonBooking.slot_time}</span>
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1">
+                      <MapPin className="size-3.5" />
+                      <span>{nextInPersonExperiment?.location || 'SFC オミクロン館'}</span>
                     </span>
+                    <span className="flex items-center gap-1 text-foreground/80 font-medium">
+                      <Gift className="size-3.5 text-amber-500" />
+                      <span>謝礼: {(nextInPersonExperiment as any)?.reward || (nextInPersonExperiment?.rewardAmount ? formatYen(nextInPersonExperiment.rewardAmount) : '謝礼あり')}</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {nextInPersonExperiment && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openExperiment(nextInPersonExperiment)}
+                      className="h-8 text-xs font-bold gap-1 bg-background"
+                    >
+                      <span>{isJa ? '詳細・教室を確認' : 'View Details'}</span>
+                    </Button>
                   )}
-                  <span className="flex items-center gap-1">
-                    <MapPin className="size-3.5" />
-                    <span>{nextExperiment?.location || 'SFC オミクロン館'}</span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openBookingsModal('in-person')}
+                    className="h-8 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                  >
+                    <span>{isJa ? '変更・キャンセル' : 'Manage'}</span>
+                  </Button>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {/* ② 回答待ちのオンライン調査セッション */}
+          {nextOnlineBooking ? (
+            <section
+              aria-label="Online Survey Awaiting Response"
+              className="rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/10 via-card to-card p-4 sm:p-5 shadow-xs transition-all"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-500/20 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-blue-600 text-white">
+                    <FileText className="size-4" />
                   </span>
-                  <span className="flex items-center gap-1 text-foreground/80 font-medium">
-                    <Gift className="size-3.5 text-amber-500" />
-                    <span>謝礼: {(nextExperiment as any)?.reward || (nextExperiment?.rewardAmount ? formatYen(nextExperiment.rewardAmount) : '謝礼あり')}</span>
+                  <span className="text-xs font-bold text-foreground">
+                    {isJa ? '回答待ちのオンライン調査（枠確保済み）' : 'Online Survey Awaiting Your Response'}
                   </span>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1.5 py-0 bg-background/80 text-blue-600 dark:text-blue-400 border-blue-500/30 font-semibold"
+                  >
+                    回答待ち
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">
+                    {onlineReservedBookings.length > 1 ? `他 ${onlineReservedBookings.length - 1}件の未回答あり` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => openBookingsModal('online')}
+                    className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                  >
+                    <span>{isJa ? `オンライン一覧（全${onlineReservedBookings.length}件）` : `View all (${onlineReservedBookings.length})`}</span>
+                    <ArrowRight className="size-3.5" />
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                {nextExperiment && (
+              <div className="pt-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5 min-w-0">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug truncate">
+                    {nextOnlineBooking.experiment_title || nextOnlineExperiment?.title || 'オンラインアンケート'}
+                  </h2>
+
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
+                      <Clock className="size-3.5" />
+                      <span>所要時間: 約{nextOnlineExperiment?.durationMins || 10}分</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <HeartHandshake className="size-3.5 text-muted-foreground" />
+                      <span>学内協力（謝礼なし）</span>
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      エントリー日: {new Date(nextOnlineBooking.applied_at).toLocaleDateString('ja-JP')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {nextOnlineExperiment && (
+                    <Button
+                      size="sm"
+                      onClick={() => openExperiment(nextOnlineExperiment)}
+                      className="h-8 text-xs font-bold gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <span>{isJa ? '今すぐ回答する' : 'Start Survey'}</span>
+                      <ArrowRight className="size-3.5" />
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => openExperiment(nextExperiment)}
-                    className="h-8 text-xs font-bold gap-1 bg-background"
+                    onClick={() => openBookingsModal('online')}
+                    className="h-8 text-xs font-semibold"
                   >
-                    <span>{isJa ? '詳細・教室を確認' : 'View Details'}</span>
+                    <span>辞退</span>
                   </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setMyBookingsOpen(true)}
-                  className="h-8 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                >
-                  <span>{isJa ? '変更・キャンセル' : 'Manage'}</span>
-                </Button>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {/* どちらも予約がない場合 */}
+          {!nextInPersonBooking && !nextOnlineBooking && (
+            <div className="rounded-xl border border-dashed bg-card/60 p-3 sm:p-4 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Calendar className="size-4" />
+                </span>
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {isJa ? '現在、参加予定・回答待ちの実験はありません' : 'No upcoming sessions'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {isJa ? '一覧から関心のある実験やアンケートに参加してみましょう！' : 'Find and join studies from the list below!'}
+                  </p>
+                </div>
               </div>
             </div>
-          </section>
-        ) : (
-          <div className="rounded-xl border border-dashed bg-card/60 p-3 sm:p-4 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5">
-              <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                <Calendar className="size-4" />
-              </span>
-              <div>
-                <p className="font-semibold text-foreground">
-                  {isJa ? '現在、確定した実験予定はありません' : 'No upcoming lab sessions'}
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  {isJa ? '空きコマの時間に合う実験に応募してみましょう！' : 'Find and join studies fitting your free periods!'}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* 2大カテゴリ切り替えタブ */}
         <div className="rounded-2xl border bg-card/60 p-2 shadow-sm backdrop-blur">
@@ -656,8 +769,10 @@ export function Dashboard() {
 
       {/* 参加予定・予約一覧モーダル */}
       <MyBookingsDialog
+        key={bookingsModalType}
         open={myBookingsOpen}
         onOpenChange={setMyBookingsOpen}
+        initialType={bookingsModalType}
         onOpenExperimentDetails={(expId) => {
           const targetExp = experiments.find((e) => e.id === expId)
           if (targetExp) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -23,9 +23,12 @@ import {
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
 
+export type BookingModalType = 'in-person' | 'online'
+
 interface MyBookingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialType?: BookingModalType
   onBookingCanceled?: (canceledExpId?: string, canceledSlotTime?: string | null) => void
   onOpenExperimentDetails?: (experimentId: string) => void
 }
@@ -44,6 +47,7 @@ interface ApplicationItem {
 export function MyBookingsDialog({
   open,
   onOpenChange,
+  initialType = 'in-person',
   onBookingCanceled,
   onOpenExperimentDetails,
 }: MyBookingsDialogProps) {
@@ -52,6 +56,17 @@ export function MyBookingsDialog({
   const [loading, setLoading] = useState(false)
   const [cancelingId, setCancelingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  // 内部のアクティブタブ
+  const [activeTab, setActiveTab] = useState<BookingModalType>(initialType)
+
+  // ★ open が true になる、または initialType が切り替わった時に確実に即時同期
+  useEffect(() => {
+    if (open) {
+      setActiveTab(initialType)
+      setNotice(null)
+    }
+  }, [open, initialType])
 
   const fetchMyBookings = useCallback(async () => {
     if (!user) {
@@ -70,14 +85,41 @@ export function MyBookingsDialog({
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        // ★ 回答完了済みのオンライン回答はアクティブ予定から除外し、マイページ履歴へ送る
+        // 回答完了済みのものはアクティブ予定から除外（マイページ履歴へ送る）
         const activeOnly = data.filter((item) => {
           if (item.status?.includes('回答完了') || item.status === '完了') {
             return false
           }
           return true
         })
-        setApplications(activeOnly)
+
+        // 期限切れのオンライン回答チェック（自動失効処理）
+        const now = Date.now()
+        const expiredApps: ApplicationItem[] = []
+        const validApps: ApplicationItem[] = []
+
+        for (const item of activeOnly) {
+          if (item.format === 'オンライン' || item.slot_id === 'online_survey') {
+            const appliedTime = new Date(item.applied_at).getTime()
+            const maxDuration = 48 * 60 * 60 * 1000
+            if (now - appliedTime > maxDuration) {
+              expiredApps.push(item)
+              continue
+            }
+          }
+          validApps.push(item)
+        }
+
+        if (expiredApps.length > 0) {
+          const expiredIds = expiredApps.map((e) => e.id)
+          supabase
+            .from('applications')
+            .update({ status: 'キャンセル済み（期限切れ）' })
+            .in('id', expiredIds)
+            .then(() => {})
+        }
+
+        setApplications(validApps)
       }
     } catch (err) {
       console.error('Failed to fetch bookings in dialog:', err)
@@ -89,12 +131,42 @@ export function MyBookingsDialog({
   useEffect(() => {
     if (open) {
       fetchMyBookings()
-      setNotice(null)
     }
   }, [open, fetchMyBookings])
 
+  const isOnlineItem = (app: ApplicationItem) => {
+    return Boolean(
+      app.format?.includes('オンライン') ||
+      app.slot_id === 'online_survey' ||
+      app.slot_time?.includes('オンライン')
+    )
+  }
+
+  // ★ 厳格に選択されたタブのみを表示
+  const filteredApplications = useMemo(() => {
+    if (activeTab === 'online') {
+      return applications.filter((app) => isOnlineItem(app))
+    }
+    return applications.filter((app) => !isOnlineItem(app))
+  }, [applications, activeTab])
+
+  const counts = useMemo(() => {
+    let inPerson = 0
+    let online = 0
+    applications.forEach((a) => {
+      if (isOnlineItem(a)) online++
+      else inPerson++
+    })
+    return { inPerson, online }
+  }, [applications])
+
   const handleCancelBooking = async (app: ApplicationItem) => {
-    if (!window.confirm(`「${app.experiment_title}」の予約をキャンセルしますか？`)) {
+    const isOnline = isOnlineItem(app)
+    const promptText = isOnline
+      ? `「${app.experiment_title}」の回答枠確保を辞退・キャンセルしますか？\n（確保した枠は全体に返却されます）`
+      : `「${app.experiment_title}」の予約をキャンセルしますか？`
+
+    if (!window.confirm(promptText)) {
       return
     }
 
@@ -131,7 +203,6 @@ export function MyBookingsDialog({
               return s
             })
 
-            // ★ 修正箇所：文法エラーを解消
             await supabase
               .from('experiments')
               .update({ spots_left: nextLeft, slots: slots })
@@ -142,7 +213,7 @@ export function MyBookingsDialog({
         console.warn('Slot restore notice:', slotErr)
       }
 
-      setNotice('予約をキャンセルしました。')
+      setNotice(isOnline ? '枠の確保を辞退しました。' : '予約をキャンセルしました。')
       setApplications((prev) => prev.filter((item) => item.id !== app.id))
 
       if (onBookingCanceled) {
@@ -165,13 +236,45 @@ export function MyBookingsDialog({
               <Calendar className="size-4" />
             </span>
             <DialogTitle className="text-base font-bold text-foreground">
-              参加予定の実験一覧
+              {activeTab === 'in-person'
+                ? '対面参加予定の実験一覧'
+                : '回答待ちのオンライン調査一覧'}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
-            あなたが現在予約・応募している実験の一覧です。
+            {activeTab === 'in-person'
+              ? 'あなたが現在予約している対面実験の一覧です。'
+              : '回答枠を確保済みのオンライン調査です。期限内にご回答ください。'}
           </DialogDescription>
         </DialogHeader>
+
+        {/* タブ切り替えバー */}
+        <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/40 rounded-xl text-xs">
+          <button
+            type="button"
+            onClick={() => setActiveTab('in-person')}
+            className={`py-2 px-2.5 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all ${
+              activeTab === 'in-person'
+                ? 'bg-background text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Building2 className="size-3.5" />
+            <span>対面実験 ({counts.inPerson})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('online')}
+            className={`py-2 px-2.5 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all ${
+              activeTab === 'online'
+                ? 'bg-background text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Globe2 className="size-3.5" />
+            <span>オンライン ({counts.online})</span>
+          </button>
+        </div>
 
         {notice && (
           <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center gap-2">
@@ -180,88 +283,97 @@ export function MyBookingsDialog({
           </div>
         )}
 
-        <div className="space-y-3 pt-2">
+        <div className="space-y-3 pt-1">
           {loading ? (
             <div className="py-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
               <Loader2 className="size-4 animate-spin text-primary" />
               <span>予約情報を確認中...</span>
             </div>
-          ) : applications.length === 0 ? (
+          ) : filteredApplications.length === 0 ? (
             <div className="rounded-xl border border-dashed bg-muted/20 p-8 text-center space-y-1.5">
-              <p className="text-xs font-bold text-foreground">現在参加待ちの実験はありません</p>
+              <p className="text-xs font-bold text-foreground">
+                {activeTab === 'in-person'
+                  ? '現在予約中の対面実験はありません'
+                  : '回答待ちのオンライン調査はありません'}
+              </p>
               <p className="text-[11px] text-muted-foreground">
-                回答完了・実施終了した実験はマイページの「実験履歴」で確認できます。
+                一覧から気になる実験に応募・回答してみましょう！
               </p>
             </div>
           ) : (
             <div className="space-y-2.5">
-              {applications.map((app) => (
-                <div
-                  key={app.id}
-                  className="p-3.5 rounded-xl border bg-card/70 space-y-2.5 hover:border-foreground/30 transition-colors"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                      {app.format === 'オンライン' ? (
-                        <span className="flex items-center gap-1">
-                          <Globe2 className="size-3" /> オンライン
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1">
-                          <Building2 className="size-3" /> 学内対面
-                        </span>
+              {filteredApplications.map((app) => {
+                const isOnline = isOnlineItem(app)
+                return (
+                  <div
+                    key={app.id}
+                    className="p-3.5 rounded-xl border bg-card/70 space-y-2.5 hover:border-foreground/30 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                        {isOnline ? (
+                          <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
+                            <Globe2 className="size-3" /> オンライン調査
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            <Building2 className="size-3" /> 学内対面
+                          </span>
+                        )}
+                      </Badge>
+                      <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                        {isOnline ? '枠確保済み' : (app.status || '確定')}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-bold text-foreground leading-snug">
+                        {app.experiment_title}
+                      </h4>
+                      {app.slot_time && (
+                        <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1 font-mono">
+                          <Clock className="size-3 text-primary" />
+                          <span>{app.slot_time}</span>
+                        </p>
                       )}
-                    </Badge>
-                    <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded">
-                      {app.status || '確定'}
-                    </span>
-                  </div>
+                    </div>
 
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-foreground leading-snug">
-                      {app.experiment_title}
-                    </h4>
-                    {app.slot_time && (
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1 font-mono">
-                        <Clock className="size-3 text-primary" />
-                        <span>{app.slot_time}</span>
-                      </p>
-                    )}
-                  </div>
+                    <div className="flex items-center justify-between pt-2 border-t text-[11px]">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          onOpenChange(false)
+                          if (onOpenExperimentDetails) {
+                            onOpenExperimentDetails(app.experiment_id)
+                          }
+                        }}
+                        className={`h-7 px-2.5 text-xs font-bold gap-1 bg-background ${
+                          isOnline ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10' : ''
+                        }`}
+                      >
+                        <ExternalLink className="size-3" />
+                        <span>{isOnline ? '回答を進める' : '詳細を確認'}</span>
+                      </Button>
 
-                  <div className="flex items-center justify-between pt-2 border-t text-[11px]">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        onOpenChange(false)
-                        if (onOpenExperimentDetails) {
-                          onOpenExperimentDetails(app.experiment_id)
-                        }
-                      }}
-                      className="h-7 px-2.5 text-xs font-bold gap-1 bg-background"
-                    >
-                      <ExternalLink className="size-3" />
-                      <span>{app.format === 'オンライン' ? '回答・コード入力' : '詳細を確認'}</span>
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={cancelingId === app.id}
-                      onClick={() => handleCancelBooking(app)}
-                      className="h-7 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive gap-1"
-                    >
-                      {cancelingId === app.id ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        <XCircle className="size-3" />
-                      )}
-                      <span>キャンセル</span>
-                    </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={cancelingId === app.id}
+                        onClick={() => handleCancelBooking(app)}
+                        className="h-7 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive gap-1"
+                      >
+                        {cancelingId === app.id ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <XCircle className="size-3" />
+                        )}
+                        <span>{isOnline ? '枠を辞退' : 'キャンセル'}</span>
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
