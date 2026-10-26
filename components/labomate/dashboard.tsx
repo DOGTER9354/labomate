@@ -68,7 +68,6 @@ export function Dashboard() {
   const [bookingsModalType, setBookingsModalType] = useState<BookingModalType>('in-person')
 
   const [isRefreshing, setIsRefreshing] = useState(false)
-  // ★ 実験IDごとの参加ステータスマップ ('none' | 'applied' | 'completed')
   const [userStatusMap, setUserStatusMap] = useState<Record<string, ParticipationStatus>>({})
   const [bookings, setBookings] = useState<Record<string, string>>({})
   const [userApplications, setUserApplications] = useState<UserApplicationRecord[]>([])
@@ -89,7 +88,7 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabase からユーザー自身の応募・参加履歴を同期取得
+  // Supabase からユーザー自身の応募・参加履歴を同期取得（＋オンライン枠の自動期限切れ判定）
   const fetchUserBookings = useCallback(async () => {
     if (!user) {
       setUserApplications([])
@@ -108,22 +107,59 @@ export function Dashboard() {
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
+        const now = new Date().getTime()
         const statusMap: Record<string, ParticipationStatus> = {}
         const bookingMap: Record<string, string> = {}
         const activeApps: UserApplicationRecord[] = []
 
-        data.forEach((app) => {
+        for (const app of data) {
           const expId = String(app.experiment_id)
-          const isDone = app.status?.includes('回答完了') || app.status === '完了'
+          const isDone =
+            app.status?.includes('回答完了') ||
+            app.status === '完了' ||
+            app.status?.includes('無効')
+          const isOnline =
+            app.format === 'オンライン' ||
+            app.slot_id === 'online_survey' ||
+            app.slot_time?.includes('オンライン')
+
+          // オンライン調査でまだ回答完了していない「確定」枠の期限切れ判定
+          if (isOnline && !isDone && app.status === '確定') {
+            const matchedExp = experiments.find((e) => String(e.id) === expId) as any
+            const expiryHours = Number(matchedExp?.expiry_hours || matchedExp?.expiryHours || 24)
+            const appliedTime = new Date(app.applied_at).getTime()
+            const elapsedHours = (now - appliedTime) / (1000 * 60 * 60)
+
+            if (elapsedHours >= expiryHours) {
+              // 期限切れ！DB を更新
+              await supabase
+                .from('applications')
+                .update({ status: '期限切れ（未回答）' })
+                .eq('id', app.id)
+
+              // 実験の残枠数を 1 つ戻す
+              if (matchedExp) {
+                const total = Number(matchedExp.spots_total ?? matchedExp.spotsTotal ?? 10)
+                const currentLeft = Number(matchedExp.spots_left ?? matchedExp.spotsLeft ?? 0)
+                const nextLeft = Math.min(total, currentLeft + 1)
+
+                await supabase
+                  .from('experiments')
+                  .update({ spots_left: nextLeft })
+                  .eq('id', matchedExp.id)
+              }
+              continue // バナーやアクティブ一覧には含めない
+            }
+          }
 
           if (isDone) {
             statusMap[expId] = 'completed'
-          } else {
+          } else if (app.status !== '期限切れ（未回答）') {
             activeApps.push(app)
             statusMap[expId] = 'applied'
             bookingMap[expId] = app.slot_id ? String(app.slot_id) : 'booked'
           }
-        })
+        }
 
         setUserApplications(activeApps)
         setBookings(bookingMap)
@@ -139,7 +175,7 @@ export function Dashboard() {
       setBookings({})
       setUserStatusMap({})
     }
-  }, [user])
+  }, [user, experiments])
 
   const fetchExperiments = useCallback(async () => {
     try {
@@ -149,7 +185,8 @@ export function Dashboard() {
           .from('applications')
           .select('experiment_id, slot_id, slot_time, status')
           .neq('status', 'キャンセル済み')
-          .neq('status', '中止・募集終了'),
+          .neq('status', '中止・募集終了')
+          .neq('status', '期限切れ（未回答）'),
       ])
 
       if (expError) {
@@ -269,9 +306,14 @@ export function Dashboard() {
   useEffect(() => {
     if (!authLoading) {
       fetchExperiments()
+    }
+  }, [authLoading, fetchExperiments])
+
+  useEffect(() => {
+    if (!authLoading && experiments.length > 0) {
       fetchUserBookings()
     }
-  }, [authLoading, user?.id, fetchExperiments, fetchUserBookings])
+  }, [authLoading, experiments, fetchUserBookings])
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
@@ -328,7 +370,7 @@ export function Dashboard() {
 
   const isApplicationOnline = useCallback(
     (app: UserApplicationRecord) => {
-      const exp = experiments.find((e) => e.id === app.experiment_id)
+      const exp = experiments.find((e) => String(e.id) === String(app.experiment_id))
       return Boolean(
         app.format?.includes('オンライン') ||
         app.slot_id === 'online_survey' ||
@@ -350,12 +392,12 @@ export function Dashboard() {
 
   const nextInPersonBooking = inPersonBookings.length > 0 ? inPersonBookings[0] : null
   const nextInPersonExperiment = nextInPersonBooking
-    ? experiments.find((e) => e.id === nextInPersonBooking.experiment_id)
+    ? experiments.find((e) => String(e.id) === String(nextInPersonBooking.experiment_id))
     : null
 
   const nextOnlineBooking = onlineReservedBookings.length > 0 ? onlineReservedBookings[0] : null
   const nextOnlineExperiment = nextOnlineBooking
-    ? experiments.find((e) => e.id === nextOnlineBooking.experiment_id)
+    ? experiments.find((e) => String(e.id) === String(nextOnlineBooking.experiment_id))
     : null
 
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
@@ -363,7 +405,7 @@ export function Dashboard() {
 
     setExperiments((prev) =>
       prev.map((exp) => {
-        if (exp.id === experimentId) {
+        if (String(exp.id) === String(experimentId)) {
           const expAny = exp as any
           const total = Number(expAny.spotsTotal ?? expAny.spots_total ?? 10)
           const currentLeft = Number(expAny.spotsLeft ?? expAny.spots_left ?? total)
@@ -529,9 +571,11 @@ export function Dashboard() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">
-                    {onlineReservedBookings.length > 1 ? `他 ${onlineReservedBookings.length - 1}件の未回答あり` : ''}
-                  </span>
+                  {onlineReservedBookings.length > 1 && (
+                    <span className="text-[11px] text-muted-foreground">
+                      他 {onlineReservedBookings.length - 1}件の未回答あり
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => openBookingsModal('online')}
@@ -735,7 +779,6 @@ export function Dashboard() {
             {visible.map((exp) => {
               const expId = String(exp.id)
               const allowMultiple = Boolean((exp as any).allowMultipleSlots || (exp as any).allow_multiple_slots)
-              // 複数枠許可の場合は 'completed' にせず枠があれば通常応募可能
               const currentStatus: ParticipationStatus = allowMultiple
                 ? (bookings[expId] ? 'applied' : 'none')
                 : (userStatusMap[expId] || 'none')
@@ -769,7 +812,6 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* ボトムナビゲーションバーの高さを完全に回避するスペーサー */}
         <div className="h-44 w-full shrink-0" aria-hidden="true" />
       </main>
 
@@ -798,7 +840,7 @@ export function Dashboard() {
         onOpenChange={setMyBookingsOpen}
         initialType={bookingsModalType}
         onOpenExperimentDetails={(expId) => {
-          const targetExp = experiments.find((e) => e.id === expId)
+          const targetExp = experiments.find((e) => String(e.id) === String(expId))
           if (targetExp) {
             openExperiment(targetExp)
           }

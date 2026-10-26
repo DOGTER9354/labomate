@@ -38,6 +38,10 @@ import {
   Loader2,
   KeyRound,
   Send,
+  SlidersHorizontal,
+  RotateCcw,
+  UserCheck,
+  Scale,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -68,8 +72,12 @@ interface ProfileData {
   email: string
   faculty: string
   grade: string
+  // 基本属性
   dominantHand: string
   vision: string
+  gender: string
+  height: string
+  weight: string
   laboCoins: number
   itemPinCount: number
   itemBadgeCount: number
@@ -93,6 +101,14 @@ const INQUIRY_CATEGORIES = [
   'その他のお問い合わせ',
 ]
 
+const DEFAULT_ATTRIBUTES = {
+  dominantHand: '設定なし',
+  vision: '設定なし',
+  gender: '設定なし',
+  height: '',
+  weight: '',
+}
+
 export default function ProfilePage() {
   const router = useRouter()
   const { language, setLanguage } = useLanguage()
@@ -105,14 +121,14 @@ export default function ProfilePage() {
   const [authGuardOpen, setAuthGuardOpen] = useState(false)
   const [keioDialogOpen, setKeioDialogOpen] = useState(false)
 
-  // メールアドレス変更用ステート
+  // メールアドレス変更用
   const [emailModalOpen, setEmailModalOpen] = useState(false)
   const [newEmail, setNewEmail] = useState('')
   const [emailLoading, setEmailLoading] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
   const [emailSuccessMsg, setEmailSuccessMsg] = useState<string | null>(null)
 
-  // パスワード再設定用ステート
+  // パスワード再設定用
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -120,7 +136,7 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccessMsg, setPasswordSuccessMsg] = useState<string | null>(null)
 
-  // ★ お問い合わせモーダル用ステート
+  // お問い合わせ用
   const [contactModalOpen, setContactModalOpen] = useState(false)
   const [contactCategory, setContactCategory] = useState(INQUIRY_CATEGORIES[0])
   const [contactMessage, setContactMessage] = useState('')
@@ -128,7 +144,7 @@ export default function ProfilePage() {
   const [contactSuccess, setContactSuccess] = useState(false)
   const [contactError, setContactError] = useState<string | null>(null)
 
-  // 大学認証ステータス
+  // 大学認証
   const [isAcademicVerified, setIsAcademicVerified] = useState(false)
   const [academicEmail, setAcademicEmail] = useState<string | null>(null)
   const [institutionName, setInstitutionName] = useState<string>('未認証')
@@ -142,8 +158,11 @@ export default function ProfilePage() {
     email: '未ログイン',
     faculty: '未設定',
     grade: '未設定',
-    dominantHand: '右利き',
-    vision: '裸眼',
+    dominantHand: '設定なし',
+    vision: '設定なし',
+    gender: '設定なし',
+    height: '',
+    weight: '',
     laboCoins: 0,
     itemPinCount: 0,
     itemBadgeCount: 0,
@@ -164,8 +183,11 @@ export default function ProfilePage() {
           email: user.email || '',
           faculty: user.user_metadata?.faculty || '未設定',
           grade: '学部生',
-          dominantHand: '右利き',
-          vision: '裸眼',
+          dominantHand: '設定なし',
+          vision: '設定なし',
+          gender: '設定なし',
+          height: '',
+          weight: '',
           laboCoins: 0,
           itemPinCount: 0,
           itemBadgeCount: 0,
@@ -208,6 +230,11 @@ export default function ProfilePage() {
             if (data.real_name_native) baseProfile.realNameNative = data.real_name_native
             if (data.real_name_english) baseProfile.realNameEnglish = data.real_name_english
             if (data.faculty) baseProfile.faculty = data.faculty
+            if (data.dominant_hand) baseProfile.dominantHand = data.dominant_hand
+            if (data.vision) baseProfile.vision = data.vision
+            if (data.gender) baseProfile.gender = data.gender
+            if (data.height) baseProfile.height = String(data.height)
+            if (data.weight) baseProfile.weight = String(data.weight)
             if (typeof data.labo_coins === 'number') baseProfile.laboCoins = data.labo_coins
             if (typeof data.item_pin_count === 'number') baseProfile.itemPinCount = data.item_pin_count
             if (typeof data.item_badge_count === 'number') baseProfile.itemBadgeCount = data.item_badge_count
@@ -251,6 +278,9 @@ export default function ProfilePage() {
               realNameEnglish: parsed.realNameEnglish || baseProfile.realNameEnglish,
               dominantHand: parsed.dominantHand || baseProfile.dominantHand,
               vision: parsed.vision || baseProfile.vision,
+              gender: parsed.gender || baseProfile.gender,
+              height: parsed.height || baseProfile.height,
+              weight: parsed.weight || baseProfile.weight,
               grade: parsed.grade || baseProfile.grade,
             }
           }
@@ -268,8 +298,11 @@ export default function ProfilePage() {
           email: 'ログインしていません',
           faculty: '未登録',
           grade: '未設定',
-          dominantHand: '未設定',
-          vision: '未設定',
+          dominantHand: '設定なし',
+          vision: '設定なし',
+          gender: '設定なし',
+          height: '',
+          weight: '',
           laboCoins: 0,
           itemPinCount: 0,
           itemBadgeCount: 0,
@@ -295,7 +328,7 @@ export default function ProfilePage() {
       const { data, error } = await supabase
         .from('applications')
         .select('*')
-        .or(`applicant_email.eq.${user.email},applicant_name.eq.${profile.name}`)
+        .or(`applicant_email.eq.${user.email},applicant_id.eq.${user.id}`)
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
@@ -306,7 +339,7 @@ export default function ProfilePage() {
     } finally {
       setLoadingHistory(false)
     }
-  }, [user, profile.name])
+  }, [user])
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -320,6 +353,13 @@ export default function ProfilePage() {
       return
     }
     setIsEditing(true)
+  }
+
+  const handleResetAttributes = () => {
+    setFormData((prev) => ({
+      ...prev,
+      ...DEFAULT_ATTRIBUTES,
+    }))
   }
 
   const handleSaveProfile = async () => {
@@ -344,6 +384,11 @@ export default function ProfilePage() {
           real_name_native: formData.realNameNative,
           real_name_english: formData.realNameEnglish,
           faculty: formData.faculty,
+          dominant_hand: formData.dominantHand,
+          vision: formData.vision,
+          gender: formData.gender,
+          height: formData.height ? parseInt(formData.height, 10) : null,
+          weight: formData.weight ? parseInt(formData.weight, 10) : null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id)
@@ -384,7 +429,7 @@ export default function ProfilePage() {
       } catch (e) {}
     }
     setSavedNotice(isJa ? `${instName} の所属認証が完了しました！` : 'Academic verification completed!')
-    setTimeout(() => setSavedNotice(null), 3500)
+    setTimeout(() => setSavedNotice(null), 3505)
   }
 
   const handleUnlinkAcademic = async () => {
@@ -489,7 +534,6 @@ export default function ProfilePage() {
     }
   }
 
-  // ★ お問い合わせ送信ハンドラー
   const handleSendContact = async (e: React.FormEvent) => {
     e.preventDefault()
     setContactError(null)
@@ -562,7 +606,6 @@ export default function ProfilePage() {
       </div>
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:px-8 space-y-6">
-        {/* 未ログイン時バナー */}
         {!user && (
           <div className="p-4 rounded-2xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div className="space-y-0.5">
@@ -747,6 +790,7 @@ export default function ProfilePage() {
         {/* タブ 1: 基本情報 */}
         {activeTab === 'basic' && (
           <div className="space-y-6">
+            {/* 大学ドメイン認証 */}
             <div className="rounded-2xl border bg-card p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -847,12 +891,15 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* 基本属性情報 & 実験参加名義 */}
+            {/* ★ カテゴリA: 実験参加名義 & アカウント情報 */}
             <div className="rounded-2xl border bg-card p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
-                <div>
-                  <h3 className="text-sm font-bold text-foreground">基本属性情報 & 実験参加名義</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                <div className="space-y-0.5">
+                  <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <UserCheck className="size-4 text-primary" />
+                    <span>実験参加名義 & アカウント情報</span>
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
                     本名は実験の主催者（研究室・教授）の名簿にのみ出席・謝礼受領確認用として共有されます。
                   </p>
                 </div>
@@ -935,23 +982,140 @@ export default function ProfilePage() {
                     className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
                   />
                 </div>
+              </div>
+            </div>
 
+            {/* ★ カテゴリB: 基本属性情報（実験マッチング用） */}
+            <div className="rounded-2xl border bg-card p-5 space-y-4">
+              <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 flex items-start gap-2.5 text-xs">
+                <SlidersHorizontal className="size-4 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-foreground">
+                    基本属性（利き手・視力・性別など）の事前登録をおすすめします
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    あらかじめ登録しておくと、あなたの条件に合致した実験だけがトップページでハイライトされ、募集条件との不一致も自動判定されます。
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <Scale className="size-4 text-primary" />
+                    <span>基本属性情報（実験マッチング用）</span>
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    実験ごとの参加条件（右利き限定、裸眼限定、身長制限など）と自動照合されます。
+                  </p>
+                </div>
+
+                {isEditing && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleResetAttributes}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1"
+                  >
+                    <RotateCcw className="size-3" />
+                    <span>属性をリセット</span>
+                  </Button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                {/* 利き手 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">利き手</label>
+                  {isEditing ? (
+                    <select
+                      value={formData.dominantHand}
+                      onChange={(e) => setFormData({ ...formData, dominantHand: e.target.value })}
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs font-medium"
+                    >
+                      <option value="設定なし">設定なし</option>
+                      <option value="右利き">右利き</option>
+                      <option value="左利き">左利き</option>
+                      <option value="両利き">両利き</option>
+                    </select>
+                  ) : (
+                    <Input
+                      readOnly
+                      value={formData.dominantHand || '設定なし'}
+                      className="bg-muted/40 cursor-default focus-visible:ring-0"
+                    />
+                  )}
+                </div>
+
+                {/* 視力・矯正 */}
+                <div className="space-y-1.5">
+                  <label className="text-muted-foreground font-medium">視力・矯正</label>
+                  {isEditing ? (
+                    <select
+                      value={formData.vision}
+                      onChange={(e) => setFormData({ ...formData, vision: e.target.value })}
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs font-medium"
+                    >
+                      <option value="設定なし">設定なし</option>
+                      <option value="裸眼">裸眼</option>
+                      <option value="コンタクトレンズ着用">コンタクトレンズ着用</option>
+                      <option value="メガネ着用">メガネ着用</option>
+                    </select>
+                  ) : (
+                    <Input
+                      readOnly
+                      value={formData.vision || '設定なし'}
+                      className="bg-muted/40 cursor-default focus-visible:ring-0"
+                    />
+                  )}
+                </div>
+
+                {/* 性別 */}
+                <div className="space-y-1.5">
+                  <label className="text-muted-foreground font-medium">性別</label>
+                  {isEditing ? (
+                    <select
+                      value={formData.gender}
+                      onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs font-medium"
+                    >
+                      <option value="設定なし">設定なし</option>
+                      <option value="男性">男性</option>
+                      <option value="女性">女性</option>
+                      <option value="その他・無回答">その他・無回答</option>
+                    </select>
+                  ) : (
+                    <Input
+                      readOnly
+                      value={formData.gender || '設定なし'}
+                      className="bg-muted/40 cursor-default focus-visible:ring-0"
+                    />
+                  )}
+                </div>
+
+                {/* 身長 */}
+                <div className="space-y-1.5">
+                  <label className="text-muted-foreground font-medium">身長 (cm)</label>
                   <Input
+                    type="number"
                     readOnly={!isEditing}
-                    value={formData.dominantHand}
-                    onChange={(e) => setFormData({ ...formData, dominantHand: e.target.value })}
+                    placeholder="設定なし (例: 172)"
+                    value={formData.height}
+                    onChange={(e) => setFormData({ ...formData, height: e.target.value })}
                     className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
                   />
                 </div>
 
+                {/* 体重 */}
                 <div className="space-y-1.5">
-                  <label className="text-muted-foreground font-medium">視力・矯正</label>
+                  <label className="text-muted-foreground font-medium">体重 (kg)</label>
                   <Input
+                    type="number"
                     readOnly={!isEditing}
-                    value={formData.vision}
-                    onChange={(e) => setFormData({ ...formData, vision: e.target.value })}
+                    placeholder="設定なし (例: 62)"
+                    value={formData.weight}
+                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
                     className={!isEditing ? 'bg-muted/40 cursor-default focus-visible:ring-0' : ''}
                   />
                 </div>
@@ -1000,41 +1164,62 @@ export default function ProfilePage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {history.map((h) => (
-                  <div
-                    key={h.id}
-                    className="p-3.5 rounded-xl border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">
-                          {h.format === 'オンライン' ? (
-                            <span className="flex items-center gap-1">
-                              <Globe2 className="size-3" /> オンライン
+                {history.map((h) => {
+                  const isExpired = h.status === '期限切れ（未回答）'
+                  const isDone =
+                    h.status?.includes('回答完了') ||
+                    h.status?.includes('完了') ||
+                    h.status?.includes('無効')
+
+                  return (
+                    <div
+                      key={h.id}
+                      className={`p-3.5 rounded-xl border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                        isExpired ? 'opacity-60 bg-muted/20' : ''
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[10px]">
+                            {h.format === 'オンライン' || h.slot_time?.includes('オンライン') ? (
+                              <span className="flex items-center gap-1">
+                                <Globe2 className="size-3" /> オンライン
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1">
+                                <Building2 className="size-3" /> 対面
+                              </span>
+                            )}
+                          </Badge>
+
+                          {isExpired ? (
+                            <Badge variant="outline" className="text-[10px] text-zinc-500 border-zinc-500/30">
+                              期限切れ（枠返却済み）
+                            </Badge>
+                          ) : isDone ? (
+                            <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                              {h.status}
                             </span>
                           ) : (
-                            <span className="flex items-center gap-1">
-                              <Building2 className="size-3" /> 対面
+                            <span className="text-[10px] text-blue-500 font-bold bg-blue-950/40 px-1.5 py-0.5 rounded">
+                              {h.status || '確定'}
                             </span>
                           )}
-                        </Badge>
-                        <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded">
-                          {h.status}
-                        </span>
+                        </div>
+                        <p className="text-xs sm:text-sm font-bold text-foreground">{h.experiment_title}</p>
+                        {h.slot_time && (
+                          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                            <Clock className="size-3" />
+                            <span>{h.slot_time}</span>
+                          </p>
+                        )}
                       </div>
-                      <p className="text-xs sm:text-sm font-bold text-foreground">{h.experiment_title}</p>
-                      {h.slot_time && (
-                        <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                          <Clock className="size-3" />
-                          <span>{h.slot_time}</span>
-                        </p>
-                      )}
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(h.applied_at).toLocaleDateString('ja-JP')}
+                      </span>
                     </div>
-                    <span className="text-[10px] text-muted-foreground">
-                      {new Date(h.applied_at).toLocaleDateString('ja-JP')}
-                    </span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -1411,7 +1596,6 @@ export default function ProfilePage() {
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* ★ アプリ内お問い合わせモーダルを開くボタン */}
                   <button
                     type="button"
                     onClick={() => {
@@ -1491,14 +1675,12 @@ export default function ProfilePage() {
         )}
       </main>
 
-      {/* ログインガードダイアログ */}
       <AuthGuardDialog
         open={authGuardOpen}
         onOpenChange={setAuthGuardOpen}
         feature="general"
       />
 
-      {/* 大学所属認証ダイアログ */}
       <KeioGuardDialog
         open={keioDialogOpen}
         onOpenChange={setKeioDialogOpen}
@@ -1507,7 +1689,6 @@ export default function ProfilePage() {
         onVerifiedSuccess={handleVerifiedSuccess}
       />
 
-      {/* ★ お問い合わせモーダル */}
       <Dialog open={contactModalOpen} onOpenChange={setContactModalOpen}>
         <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
           <DialogHeader className="space-y-1.5">
@@ -1610,7 +1791,6 @@ export default function ProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* 登録メールアドレス変更モーダル */}
       <Dialog open={emailModalOpen} onOpenChange={setEmailModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader className="space-y-2">
@@ -1685,7 +1865,6 @@ export default function ProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* パスワード再設定モーダル */}
       <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader className="space-y-2">
