@@ -33,6 +33,7 @@ import {
   Hand,
   Eye,
   Scale,
+  CalendarDays,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -91,6 +92,10 @@ export function CreateExperimentDialog({
   const [description, setDescription] = useState('')
   const [surveyUrl, setSurveyUrl] = useState('')
   const [expiryHours, setExpiryHours] = useState('24')
+
+  // ★ オンライン回答の全体締切日（YYYY-MM-DD）
+  const [onlineClosingDate, setOnlineClosingDate] = useState<string>('')
+  const [hasClosingDate, setHasClosingDate] = useState<boolean>(false)
 
   const [allowMultipleSlots, setAllowMultipleSlots] = useState<boolean>(false)
   const [requiresKeioBadge, setRequiresKeioBadge] = useState<boolean>(true)
@@ -174,7 +179,9 @@ export function CreateExperimentDialog({
     const year = today.getFullYear()
     const month = String(today.getMonth() + 1).padStart(2, '0')
     const day = String(today.getDate()).padStart(2, '0')
-    setNewSlotDate(`${year}-${month}-${day}`)
+    const todayStr = `${year}-${month}-${day}`
+    setNewSlotDate(todayStr)
+    setOnlineClosingDate(todayStr)
 
     const curH = String(today.getHours()).padStart(2, '0')
     const curM = String(today.getMinutes()).padStart(2, '0')
@@ -204,6 +211,11 @@ export function CreateExperimentDialog({
       setDescription(initialData.description || '')
       setSurveyUrl(initialData.survey_url || '')
       setExpiryHours(String(initialData.expiry_hours ?? 24))
+
+      const cDate = initialData.closing_date || initialData.deadline || ''
+      setOnlineClosingDate(cDate)
+      setHasClosingDate(Boolean(cDate))
+
       setAllowMultipleSlots(Boolean(initialData.allow_multiple_slots))
       setRequiresKeioBadge(
         initialData.requires_keio_badge !== undefined
@@ -255,6 +267,7 @@ export function CreateExperimentDialog({
       setDescription('')
       setSurveyUrl('')
       setExpiryHours('24')
+      setHasClosingDate(false)
       setAllowMultipleSlots(false)
       setRequiresKeioBadge(true)
       setFilterPriorKnowledge(false)
@@ -444,7 +457,6 @@ export function CreateExperimentDialog({
             })
           : []
 
-      // requirements 配列に条件ラベルをすべて格納（カード表示側で100%バッジ化できるようにする）
       const generatedRequirements: string[] = ['慶應義塾大学の学生・院生']
       if (requiresKeioBadge) generatedRequirements.push('慶應認証バッジ限定')
       if (filterPriorKnowledge) generatedRequirements.push('事前知識なし限定')
@@ -457,6 +469,8 @@ export function CreateExperimentDialog({
       if (requiredGender === 'female') generatedRequirements.push('女性限定')
       customQualifications.forEach((q) => generatedRequirements.push(q))
 
+      const finalClosingDate = mode === 'online' && hasClosingDate && onlineClosingDate ? onlineClosingDate : null
+
       const experimentPayload: any = {
         title: title.trim(),
         lab_name: labName.trim(),
@@ -468,6 +482,8 @@ export function CreateExperimentDialog({
         description: description.trim(),
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
         expiry_hours: mode === 'online' ? parseInt(expiryHours) || 24 : null,
+        closing_date: finalClosingDate,
+        deadline: finalClosingDate,
         spots_total: totalSpots,
         allow_multiple_slots: allowMultipleSlots,
         requires_keio_badge: requiresKeioBadge,
@@ -509,6 +525,8 @@ export function CreateExperimentDialog({
         delete corePayload.required_dominant_hand
         delete corePayload.required_vision
         delete corePayload.custom_qualifications
+        delete corePayload.closing_date
+        delete corePayload.deadline
 
         error = await attemptSave(corePayload)
         if (error && error.message?.includes('created_by')) {
@@ -644,7 +662,7 @@ export function CreateExperimentDialog({
               )}
             </div>
 
-            {/* オンラインアンケート用 */}
+            {/* オンラインアンケート用設定エリア */}
             {mode === 'online' ? (
               <div className="space-y-4">
                 <div className="p-3.5 rounded-xl border bg-muted/20 flex items-start gap-2.5 text-xs">
@@ -658,6 +676,7 @@ export function CreateExperimentDialog({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  {/* 所要時間入力 & クイック選択 */}
                   <div className="space-y-1.5">
                     <Label className="font-bold text-foreground flex items-center gap-1">
                       <span>目安所要時間（分）</span>
@@ -689,6 +708,7 @@ export function CreateExperimentDialog({
                     </div>
                   </div>
 
+                  {/* 回答有効期限（枠保持時間） */}
                   <div className="space-y-1.5">
                     <Label className="font-bold text-foreground flex items-center gap-1">
                       <Clock className="size-3.5 text-primary" />
@@ -709,6 +729,44 @@ export function CreateExperimentDialog({
                       ※ 枠確保後この時間を過ぎても未回答の場合、自動で枠が全体に返却されます。
                     </p>
                   </div>
+                </div>
+
+                {/* ★ 全体の最終締切日設定（⑥ オンライン回答の最終締切日時） */}
+                <div className="p-3.5 rounded-xl border bg-card space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-foreground flex items-center gap-1.5">
+                        <CalendarDays className="size-4 text-primary" />
+                        <span>アンケート全体の受付終了日（最終締切日）</span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        指定した日付を過ぎると自動的に募集が締め切られ、新規の参加受付が終了します。
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setHasClosingDate((prev) => !prev)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                        hasClosingDate
+                          ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                          : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                      }`}
+                    >
+                      {hasClosingDate ? '締切日: 設定中' : '期限なし (定員まで)'}
+                    </button>
+                  </div>
+
+                  {hasClosingDate && (
+                    <div className="pt-2 border-t border-border/60 max-w-sm animate-in fade-in">
+                      <Label className="text-[11px] text-muted-foreground font-medium block mb-1">
+                        受付を締め切る日付を選択
+                      </Label>
+                      <SegmentedDatePicker
+                        value={onlineClosingDate}
+                        onChange={(val) => setOnlineClosingDate(val)}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

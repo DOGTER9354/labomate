@@ -37,6 +37,7 @@ import {
   Eye,
   Hand,
   ArrowRight,
+  Scale,
 } from 'lucide-react'
 import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
@@ -52,6 +53,48 @@ interface ExperimentDialogProps {
 }
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
+
+// スロットの日時文字列から開始日時をパースして過去枠かどうか判定
+function isSlotExpired(timeStr: string): boolean {
+  if (!timeStr) return false
+  try {
+    const now = new Date()
+    const currentYear = now.getFullYear()
+
+    // パターン1: "10/27 (火) 05:34-06:04"
+    const matchSlash = timeStr.match(/(\d{1,2})\/(\d{1,2}).*?(\d{1,2}):(\d{2})/)
+    if (matchSlash) {
+      const month = parseInt(matchSlash[1], 10) - 1
+      const day = parseInt(matchSlash[2], 10)
+      const hours = parseInt(matchSlash[3], 10)
+      const minutes = parseInt(matchSlash[4], 10)
+
+      let slotDate = new Date(currentYear, month, day, hours, minutes)
+      // 年末年始跨ぎの補正
+      if (now.getMonth() === 11 && month === 0) {
+        slotDate.setFullYear(currentYear + 1)
+      } else if (now.getMonth() === 0 && month === 11) {
+        slotDate.setFullYear(currentYear - 1)
+      }
+      return now.getTime() > slotDate.getTime()
+    }
+
+    // パターン2: "2026-10-27 05:34"
+    const matchIso = timeStr.match(/(\d{4})-(\d{1,2})-(\d{1,2}).*?(\d{1,2}):(\d{2})/)
+    if (matchIso) {
+      const year = parseInt(matchIso[1], 10)
+      const month = parseInt(matchIso[2], 10) - 1
+      const day = parseInt(matchIso[3], 10)
+      const hours = parseInt(matchIso[4], 10)
+      const minutes = parseInt(matchIso[5], 10)
+      const slotDate = new Date(year, month, day, hours, minutes)
+      return now.getTime() > slotDate.getTime()
+    }
+  } catch (e) {
+    console.error('Error parsing slot date:', e)
+  }
+  return false
+}
 
 export function ExperimentDialog({
   experiment,
@@ -87,7 +130,7 @@ export function ExperimentDialog({
 
   // 参加条件同意ステート
   const [checkedAgreements, setCheckedAgreements] = useState<Record<string, boolean>>({})
-  const [isConditionsExpanded, setIsConditionsExpanded] = useState(false)
+  const [isConditionsExpanded, setIsConditionsExpanded] = useState(true)
 
   useEffect(() => {
     if (!open || !user || !experiment) return
@@ -177,9 +220,9 @@ export function ExperimentDialog({
 
         setRealNameNative(nativeName)
         setRealNameEnglish(englishName)
-        setUserDominantHand(dominantHand)
-        setUserVision(vision)
-        setUserGender(gender)
+        setUserDominantHand(dominantHand || '設定なし')
+        setUserVision(vision || '設定なし')
+        setUserGender(gender || '設定なし')
         setHasExistingRealName(Boolean(nativeName.trim() && englishName.trim()))
         setIsKeioVerified(verified)
       } catch (err) {
@@ -200,7 +243,7 @@ export function ExperimentDialog({
       setHasOpenedForm(false)
       setHasSubmittedSurvey(false)
       setCheckedAgreements({})
-      setIsConditionsExpanded(false)
+      setIsConditionsExpanded(true)
     }
   }, [open])
 
@@ -219,7 +262,7 @@ export function ExperimentDialog({
   const expiryHours = Number(expAny.expiry_hours || expAny.expiryHours || 24)
   const allowMultipleSlots = Boolean(expAny.allow_multiple_slots || expAny.allowMultipleSlots)
 
-  // 条件の抽出
+  // 1. 研究倫理チェック
   const ethicsConditions: { id: string; label: string }[] = []
   if (expAny.filter_prior_knowledge ?? expAny.requirements?.some((r: string) => r.includes('事前知識なし'))) {
     ethicsConditions.push({
@@ -234,36 +277,62 @@ export function ExperimentDialog({
     })
   }
 
-  // マイページ属性照合
+  // 2. 属性照合（利き手・視力・性別）
   const reqHand = expAny.required_dominant_hand || (expAny.requirements?.some((r: string) => r.includes('右利き')) ? 'right' : expAny.requirements?.some((r: string) => r.includes('左利き')) ? 'left' : 'any')
   const reqVision = expAny.required_vision || (expAny.requirements?.some((r: string) => r.includes('裸眼')) ? 'naked' : expAny.requirements?.some((r: string) => r.includes('矯正視力')) ? 'corrected' : 'any')
+  const reqGender = expAny.required_gender || (expAny.requirements?.some((r: string) => r.includes('男性限定')) ? 'male' : expAny.requirements?.some((r: string) => r.includes('女性限定')) ? 'female' : 'any')
+
+  const hasRegisteredHand = userDominantHand && userDominantHand !== '設定なし'
+  const hasRegisteredVision = userVision && userVision !== '設定なし'
+  const hasRegisteredGender = userGender && userGender !== '設定なし'
 
   const handMatched =
     reqHand === 'any' ||
-    userDominantHand === '設定なし' ||
-    (reqHand === 'right' && userDominantHand.includes('右')) ||
-    (reqHand === 'left' && userDominantHand.includes('左'))
+    (hasRegisteredHand && ((reqHand === 'right' && userDominantHand.includes('右')) || (reqHand === 'left' && userDominantHand.includes('左'))))
 
   const visionMatched =
     reqVision === 'any' ||
-    userVision === '設定なし' ||
-    (reqVision === 'naked' && userVision.includes('裸眼')) ||
-    (reqVision === 'corrected' && (userVision.includes('コンタクト') || userVision.includes('メガネ')))
+    (hasRegisteredVision && ((reqVision === 'naked' && userVision.includes('裸眼')) || (reqVision === 'corrected' && (userVision.includes('コンタクト') || userVision.includes('メガネ')))))
 
-  // ★ 不一致理由のテキスト生成
+  const genderMatched =
+    reqGender === 'any' ||
+    (hasRegisteredGender && ((reqGender === 'male' && userGender === '男性') || (reqGender === 'female' && userGender === '女性')))
+
   const mismatchReasons: string[] = []
-  if (!handMatched) {
-    mismatchReasons.push(
-      `利き手条件: ${reqHand === 'right' ? '右利き限定' : '左利き限定'}（あなたの登録: ${userDominantHand}）`
-    )
+  if (reqHand !== 'any' && hasRegisteredHand && !handMatched) {
+    mismatchReasons.push(`利き手条件: ${reqHand === 'right' ? '右利き限定' : '左利き限定'}（あなたの登録: ${userDominantHand}）`)
   }
-  if (!visionMatched) {
-    mismatchReasons.push(
-      `視力条件: ${reqVision === 'naked' ? '裸眼限定' : '矯正視力限定（メガネ・コンタクト着用）'}（あなたの登録: ${userVision}）`
-    )
+  if (reqVision !== 'any' && hasRegisteredVision && !visionMatched) {
+    mismatchReasons.push(`視力条件: ${reqVision === 'naked' ? '裸眼限定' : '矯正視力限定（メガネ・コンタクト着用）'}（あなたの登録: ${userVision}）`)
+  }
+  if (reqGender !== 'any' && hasRegisteredGender && !genderMatched) {
+    mismatchReasons.push(`性別条件: ${reqGender === 'male' ? '男性限定' : '女性限定'}（あなたの登録: ${userGender}）`)
   }
 
   const isProfileMismatched = mismatchReasons.length > 0
+
+  const unconfiguredAgreements: { id: string; label: string; icon: any }[] = []
+  if (reqHand !== 'any' && !hasRegisteredHand) {
+    unconfiguredAgreements.push({
+      id: 'unconf_hand',
+      label: `私は【${reqHand === 'right' ? '右利き' : '左利き'}】です（プロフィール未設定のため自己申告）`,
+      icon: Hand,
+    })
+  }
+  if (reqVision !== 'any' && !hasRegisteredVision) {
+    unconfiguredAgreements.push({
+      id: 'unconf_vision',
+      label: `私は【${reqVision === 'naked' ? '裸眼' : '矯正視力（メガネ・コンタクト着用）'}】の条件を満たしています（プロフィール未設定のため自己申告）`,
+      icon: Eye,
+    })
+  }
+  if (reqGender !== 'any' && !hasRegisteredGender) {
+    unconfiguredAgreements.push({
+      id: 'unconf_gender',
+      label: `私は【${reqGender === 'male' ? '男性' : '女性'}】です（プロフィール未設定のため自己申告）`,
+      icon: Scale,
+    })
+  }
 
   const customList: string[] = Array.isArray(expAny.custom_qualifications)
     ? expAny.custom_qualifications
@@ -271,6 +340,7 @@ export function ExperimentDialog({
 
   const allManualAgreements = [
     ...ethicsConditions,
+    ...unconfiguredAgreements.map((u) => ({ id: u.id, label: u.label })),
     ...customList.map((q, idx) => ({ id: `custom_${idx}`, label: q })),
   ]
 
@@ -278,6 +348,7 @@ export function ExperimentDialog({
     ethicsConditions.length +
     (reqHand !== 'any' ? 1 : 0) +
     (reqVision !== 'any' ? 1 : 0) +
+    (reqGender !== 'any' ? 1 : 0) +
     customList.length
 
   const isAllManualAgreed = allManualAgreements.every((req) => Boolean(checkedAgreements[req.id]))
@@ -326,17 +397,17 @@ export function ExperimentDialog({
       return
     }
 
+    if (!isAllManualAgreed) {
+      setErrorMessage('参加条件・誓約事項のすべてのチェックボックスをご確認の上、同意してください。')
+      return
+    }
+
     if (isBlockedBySingleSlotRule || isBlockedOnlineNewEntry || (isOnline && isOnlineCompleted)) {
       setErrorMessage(
         isOnline
           ? 'このアンケートは1人1回限定です。すでに回答を完了または枠を確保しています。'
           : 'この実験は1人1枠限定のため、追加応募はできません。'
       )
-      return
-    }
-
-    if (!isAllManualAgreed) {
-      setErrorMessage('参加条件・倫理確認事項のすべての項目に同意（チェック）してください。')
       return
     }
 
@@ -350,6 +421,15 @@ export function ExperimentDialog({
     if (!isOnline && experiment.slots && experiment.slots.length > 0 && !selectedSlotId) {
       setErrorMessage('参加希望の日時枠を選択してください。')
       return
+    }
+
+    // 選択されたスロットが過去枠でないかの最終バリデーション
+    if (!isOnline && selectedSlotId) {
+      const selectedSlot = experiment.slots?.find((s) => String(s.id) === String(selectedSlotId))
+      if (selectedSlot && isSlotExpired(selectedSlot.time)) {
+        setErrorMessage('選択された時間枠は既に受付を終了しています。別の日時を選択してください。')
+        return
+      }
     }
 
     if (isOnline && isOnlineReserved) {
@@ -585,7 +665,7 @@ export function ExperimentDialog({
           </div>
         ) : (
           <div className="space-y-4 pt-2">
-            {/* ★ 赤い行で理由を表示する不一致アラートボックス */}
+            {/* 赤い行で理由を表示する不一致アラートボックス */}
             {isProfileMismatched && (
               <div className="p-3.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-400 space-y-2 animate-in fade-in">
                 <div className="flex items-start gap-2">
@@ -714,7 +794,7 @@ export function ExperimentDialog({
                           ? '条件不一致'
                           : isAllConditionsSatisfied
                           ? 'すべて確認済み'
-                          : `条件: 計${totalConditionsCount}件`}
+                          : `未同意: ${allManualAgreements.filter((a) => !checkedAgreements[a.id]).length}件`}
                       </span>
                     </p>
                     <p className="text-[11px] text-muted-foreground">
@@ -722,7 +802,7 @@ export function ExperimentDialog({
                         ? 'あなたの登録属性と条件が一致していません。'
                         : isAllConditionsSatisfied
                         ? '条件への同意とプロフィール照合が完了しています。'
-                        : 'タップして詳細を確認し、同意してください。'}
+                        : 'タップして詳細を確認し、同意チェックを入れてください。'}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 text-primary font-bold text-xs shrink-0">
@@ -741,12 +821,12 @@ export function ExperimentDialog({
                     {ethicsConditions.length > 0 && (
                       <div className="space-y-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-                          研究倫理・バイアス防止
+                          研究倫理・バイアス防止（同意必須）
                         </span>
                         {ethicsConditions.map((req) => (
                           <label
                             key={req.id}
-                            className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2 rounded-lg bg-background border"
+                            className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2 rounded-lg bg-background border hover:border-foreground/40 transition-colors"
                           >
                             <input
                               type="checkbox"
@@ -765,43 +845,139 @@ export function ExperimentDialog({
                       </div>
                     )}
 
-                    {/* ② マイページ属性自動照合 */}
-                    {(reqHand !== 'any' || reqVision !== 'any') && (
+                    {/* ② マイページ登録属性との照合 */}
+                    {(reqHand !== 'any' || reqVision !== 'any' || reqGender !== 'any') && (
                       <div className="space-y-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-                          マイページ登録属性との自動照合
+                          被験者属性の適合確認
                         </span>
 
+                        {/* 利き手 */}
                         {reqHand !== 'any' && (
-                          <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
-                            handMatched ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-destructive/10 border-destructive/20 text-destructive'
-                          }`}>
-                            <div className="flex items-center gap-2">
-                              <Hand className="size-3.5" />
-                              <span>
-                                条件: {reqHand === 'right' ? '右利き限定' : '左利き限定'}（あなたの登録: {userDominantHand}）
-                              </span>
+                          hasRegisteredHand ? (
+                            <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
+                              handMatched ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-destructive/10 border-destructive/20 text-destructive'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <Hand className="size-3.5 text-muted-foreground" />
+                                <span>
+                                  条件: {reqHand === 'right' ? '右利き限定' : '左利き限定'}（登録: {userDominantHand}）
+                                </span>
+                              </div>
+                              <Badge variant="outline" className={`text-[10px] ${handMatched ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'text-destructive border-destructive/30'}`}>
+                                {handMatched ? '照合一致' : '条件不一致'}
+                              </Badge>
                             </div>
-                            <Badge variant="outline" className={`text-[10px] ${handMatched ? 'text-emerald-500 border-emerald-500/30' : 'text-destructive border-destructive/30'}`}>
-                              {handMatched ? '照合一致' : '条件不一致'}
-                            </Badge>
-                          </div>
+                          ) : (
+                            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2.5 rounded-lg bg-background border border-amber-500/30 hover:border-amber-500/60 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(checkedAgreements['unconf_hand'])}
+                                onChange={(e) =>
+                                  setCheckedAgreements((prev) => ({
+                                    ...prev,
+                                    unconf_hand: e.target.checked,
+                                  }))
+                                }
+                                className="mt-0.5 size-4 rounded border-input text-primary focus:ring-primary accent-primary"
+                              />
+                              <div className="space-y-0.5">
+                                <span className="font-bold flex items-center gap-1.5 text-foreground">
+                                  <Hand className="size-3.5 text-primary" />
+                                  <span>私は【{reqHand === 'right' ? '右利き' : '左利き'}】です</span>
+                                </span>
+                                <p className="text-[10px] text-muted-foreground">
+                                  ※ マイページの利き手が未設定のため、自己申告で誓約・同意します
+                                </p>
+                              </div>
+                            </label>
+                          )
                         )}
 
+                        {/* 視力 */}
                         {reqVision !== 'any' && (
-                          <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
-                            visionMatched ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-destructive/10 border-destructive/20 text-destructive'
-                          }`}>
-                            <div className="flex items-center gap-2">
-                              <Eye className="size-3.5" />
-                              <span>
-                                条件: {reqVision === 'naked' ? '裸眼限定' : '矯正視力限定'}（あなたの登録: {userVision}）
-                              </span>
+                          hasRegisteredVision ? (
+                            <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
+                              visionMatched ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-destructive/10 border-destructive/20 text-destructive'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <Eye className="size-3.5 text-muted-foreground" />
+                                <span>
+                                  条件: {reqVision === 'naked' ? '裸眼限定' : '矯正視力限定'}（登録: {userVision}）
+                                </span>
+                              </div>
+                              <Badge variant="outline" className={`text-[10px] ${visionMatched ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'text-destructive border-destructive/30'}`}>
+                                {visionMatched ? '照合一致' : '条件不一致'}
+                              </Badge>
                             </div>
-                            <Badge variant="outline" className={`text-[10px] ${visionMatched ? 'text-emerald-500 border-emerald-500/30' : 'text-destructive border-destructive/30'}`}>
-                              {visionMatched ? '照合一致' : '条件不一致'}
-                            </Badge>
-                          </div>
+                          ) : (
+                            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2.5 rounded-lg bg-background border border-amber-500/30 hover:border-amber-500/60 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(checkedAgreements['unconf_vision'])}
+                                onChange={(e) =>
+                                  setCheckedAgreements((prev) => ({
+                                    ...prev,
+                                    unconf_vision: e.target.checked,
+                                  }))
+                                }
+                                className="mt-0.5 size-4 rounded border-input text-primary focus:ring-primary accent-primary"
+                              />
+                              <div className="space-y-0.5">
+                                <span className="font-bold flex items-center gap-1.5 text-foreground">
+                                  <Eye className="size-3.5 text-primary" />
+                                  <span>
+                                    私は【{reqVision === 'naked' ? '裸眼' : '矯正視力（メガネ・コンタクト着用）'}】の条件を満たしています
+                                  </span>
+                                </span>
+                                <p className="text-[10px] text-muted-foreground">
+                                  ※ マイページの視力が未設定のため、自己申告で誓約・同意します
+                                </p>
+                              </div>
+                            </label>
+                          )
+                        )}
+
+                        {/* 性別 */}
+                        {reqGender !== 'any' && (
+                          hasRegisteredGender ? (
+                            <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
+                              genderMatched ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-destructive/10 border-destructive/20 text-destructive'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <Scale className="size-3.5 text-muted-foreground" />
+                                <span>
+                                  条件: {reqGender === 'male' ? '男性限定' : '女性限定'}（登録: {userGender}）
+                                </span>
+                              </div>
+                              <Badge variant="outline" className={`text-[10px] ${genderMatched ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'text-destructive border-destructive/30'}`}>
+                                {genderMatched ? '照合一致' : '条件不一致'}
+                              </Badge>
+                            </div>
+                          ) : (
+                            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2.5 rounded-lg bg-background border border-amber-500/30 hover:border-amber-500/60 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(checkedAgreements['unconf_gender'])}
+                                onChange={(e) =>
+                                  setCheckedAgreements((prev) => ({
+                                    ...prev,
+                                    unconf_gender: e.target.checked,
+                                  }))
+                                }
+                                className="mt-0.5 size-4 rounded border-input text-primary focus:ring-primary accent-primary"
+                              />
+                              <div className="space-y-0.5">
+                                <span className="font-bold flex items-center gap-1.5 text-foreground">
+                                  <Scale className="size-3.5 text-primary" />
+                                  <span>私は【{reqGender === 'male' ? '男性' : '女性'}】です</span>
+                                </span>
+                                <p className="text-[10px] text-muted-foreground">
+                                  ※ マイページの性別が未設定のため、自己申告で誓約・同意します
+                                </p>
+                              </div>
+                            </label>
+                          )
                         )}
                       </div>
                     )}
@@ -810,14 +986,14 @@ export function ExperimentDialog({
                     {customList.length > 0 && (
                       <div className="space-y-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-                          研究室指定の参加条件
+                          研究室指定の参加条件（同意必須）
                         </span>
                         {customList.map((item, idx) => {
                           const cid = `custom_${idx}`
                           return (
                             <label
                               key={cid}
-                              className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2 rounded-lg bg-background border"
+                              className="flex items-start gap-2.5 cursor-pointer text-xs text-foreground p-2 rounded-lg bg-background border hover:border-foreground/40 transition-colors"
                             >
                               <input
                                 type="checkbox"
@@ -949,12 +1125,16 @@ export function ExperimentDialog({
                     )}
                   </div>
 
+                  {/* ★ スロット一覧（過去枠の自動無効化対応） */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     {experiment.slots.map((slot: any) => {
                       const booked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
                       const capacity = Number(slot.capacity ?? slot.maxParticipants ?? 1)
                       const isFull = booked >= capacity
                       const remainingInSlot = Math.max(0, capacity - booked)
+
+                      // 過去枠（開始時刻を過ぎているか）判定
+                      const isPast = isSlotExpired(slot.time)
 
                       const isAlreadyBookedByMe = userBookedSlots.some((b) => {
                         if (b.id && slot.id) {
@@ -965,7 +1145,7 @@ export function ExperimentDialog({
 
                       const isSelected = selectedSlotId === slot.id
                       const isDisabled =
-                        isFull || isAlreadyBookedByMe || isBlockedBySingleSlotRule || isBlockedByKeioRule || isProfileMismatched
+                        isPast || isFull || isAlreadyBookedByMe || isBlockedBySingleSlotRule || isBlockedByKeioRule || isProfileMismatched
 
                       return (
                         <button
@@ -976,6 +1156,10 @@ export function ExperimentDialog({
                           className={`p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
                             isAlreadyBookedByMe
                               ? 'opacity-85 border-emerald-500/40 bg-emerald-500/10 cursor-not-allowed'
+                              : isPast
+                              ? 'opacity-40 bg-muted/20 border-dashed border-border text-muted-foreground cursor-not-allowed'
+                              : isFull
+                              ? 'opacity-45 cursor-not-allowed bg-muted/10'
                               : isDisabled
                               ? 'opacity-40 cursor-not-allowed bg-muted/10'
                               : isSelected
@@ -983,12 +1167,16 @@ export function ExperimentDialog({
                               : 'hover:border-foreground/40 bg-card'
                           }`}
                         >
-                          <span className="font-mono">{slot.time || '日時枠'}</span>
+                          <span className={`font-mono ${isPast ? 'line-through text-muted-foreground' : ''}`}>
+                            {slot.time || '日時枠'}
+                          </span>
                           <div className="flex items-center gap-1.5 text-[10px]">
                             {isAlreadyBookedByMe ? (
                               <span className="text-emerald-500 font-bold">
                                 予約済み ({remainingInSlot > 0 ? `残り ${remainingInSlot}枠` : '満員'})
                               </span>
+                            ) : isPast ? (
+                              <span className="text-rose-500/80 font-semibold">受付終了 (過去枠)</span>
                             ) : isFull ? (
                               <span className="text-muted-foreground font-semibold">満員</span>
                             ) : (
@@ -1110,7 +1298,7 @@ export function ExperimentDialog({
                     ? '条件不一致のため応募不可'
                     : isBlockedGeneral
                     ? '応募上限に達しています'
-                    : !isAllManualAgreed
+                    : !isAllConditionsSatisfied
                     ? '参加条件の同意が必要です'
                     : isOnline
                     ? isOnlineReserved
