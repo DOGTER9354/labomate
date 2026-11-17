@@ -61,8 +61,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="ja" suppressHydrationWarning>
-      <body className={`${inter.className} min-h-dvh bg-background text-foreground antialiased selection:bg-primary/20`}>
+    <html lang="ja" suppressHydrationWarning className="overflow-x-hidden">
+      <body className={`${inter.className} min-h-dvh w-full overflow-x-hidden bg-background text-foreground antialiased selection:bg-primary/20`}>
         <ThemeProvider>
           <AuthProvider>
             <LanguageProvider>

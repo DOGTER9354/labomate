@@ -35,7 +35,6 @@ export function TopNav({
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // Supabase DB からコイン残高を取得
   useEffect(() => {
     if (!user) {
       setLaboCoins(0)
@@ -53,7 +52,6 @@ export function TopNav({
         if (!error && data && typeof data.labo_coins === 'number') {
           setLaboCoins(data.labo_coins)
         } else {
-          // フォールバック
           setLaboCoins(350)
         }
       } catch (e) {
@@ -64,7 +62,6 @@ export function TopNav({
     fetchCoins()
   }, [user])
 
-  // メニュー外クリックで閉じる
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -81,11 +78,11 @@ export function TopNav({
   }
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/80 bg-background/85 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-30 w-full border-b border-border/80 bg-background/85 backdrop-blur-md">
+      <div className="mx-auto flex h-14 sm:h-16 max-w-7xl items-center justify-between gap-1.5 sm:gap-3 px-3 sm:px-6 lg:px-8">
         {/* ロゴ ＆ アプリ名（CoLabo） */}
-        <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
-          <div className="relative size-9 rounded-xl overflow-hidden border border-border/60 bg-muted/30 shadow-xs transition-transform group-hover:scale-105">
+        <Link href="/" className="flex items-center gap-2 sm:gap-2.5 min-w-0 shrink group">
+          <div className="relative size-8 sm:size-9 shrink-0 rounded-xl overflow-hidden border border-border/60 bg-muted/30 shadow-xs transition-transform group-hover:scale-105">
             <Image
               src="/colabo-icon.png"
               alt="CoLabo Logo"
@@ -95,27 +92,27 @@ export function TopNav({
               priority
             />
           </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1.5 leading-none">
-              <span className="font-extrabold text-base tracking-tight text-foreground group-hover:text-primary transition-colors">
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 leading-none">
+              <span className="font-extrabold text-sm sm:text-base tracking-tight text-foreground group-hover:text-primary transition-colors">
                 CoLabo
               </span>
               <Badge
                 variant="secondary"
-                className="text-[9px] px-1.5 py-0 font-bold bg-primary/10 text-primary border border-primary/20 uppercase"
+                className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0 font-bold bg-primary/10 text-primary border border-primary/20 uppercase shrink-0"
               >
                 Keio SFC
               </Badge>
             </div>
-            <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+            <span className="hidden sm:block text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">
               {isJa ? '研究・プロジェクト共創プラットフォーム' : 'Research & Project Matching'}
             </span>
           </div>
         </Link>
 
-        {/* 検索バー（中央） */}
+        {/* 検索バー（中央・PC/タブレット） */}
         {onQueryChange && (
-          <div className="flex-1 max-w-md mx-2 hidden sm:block">
+          <div className="flex-1 max-w-md mx-2 hidden md:block">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
@@ -129,23 +126,23 @@ export function TopNav({
           </div>
         )}
 
-        {/* 右側：テーマ切替、言語切替、コイン、プロフィール/ログインアイコン */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* 右側：テーマ切替、言語切替、コイン、プロフィール/ログイン */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* テーマ切替ポップアップ */}
           <div className="relative" ref={menuRef}>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setThemeMenuOpen(!themeMenuOpen)}
-              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-muted-foreground hover:text-foreground"
               title={isJa ? '外観テーマの切替' : 'Change theme'}
             >
               {theme === 'system' ? (
-                <Laptop className="size-4" />
+                <Laptop className="size-3.5 sm:size-4" />
               ) : resolvedTheme === 'dark' ? (
-                <Moon className="size-4" />
+                <Moon className="size-3.5 sm:size-4" />
               ) : (
-                <Sun className="size-4" />
+                <Sun className="size-3.5 sm:size-4" />
               )}
             </Button>
 
@@ -201,7 +198,7 @@ export function TopNav({
             variant="ghost"
             size="sm"
             onClick={() => setLanguage(isJa ? 'en' : 'ja')}
-            className="h-8 px-2 text-xs font-bold text-muted-foreground hover:text-foreground"
+            className="h-7 sm:h-8 px-1.5 sm:px-2 text-[11px] sm:text-xs font-bold text-muted-foreground hover:text-foreground"
           >
             {isJa ? 'EN' : 'JP'}
           </Button>
@@ -209,9 +206,9 @@ export function TopNav({
           {/* 保有コインリンク */}
           <Link
             href="/shop"
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border bg-amber-500/10 border-amber-500/25 text-amber-500 hover:bg-amber-500/15 transition-colors font-bold text-xs"
+            className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-full border bg-amber-500/10 border-amber-500/25 text-amber-500 hover:bg-amber-500/15 transition-colors font-bold text-[11px] sm:text-xs"
           >
-            <Coins className="size-3.5 text-amber-500" />
+            <Coins className="size-3 sm:size-3.5 text-amber-500 shrink-0" />
             <span>{laboCoins} LC</span>
           </Link>
 
@@ -219,17 +216,17 @@ export function TopNav({
           {user ? (
             <Link
               href="/profile"
-              className="flex size-8 items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-primary font-bold text-xs hover:border-primary transition-colors"
+              className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-primary font-bold text-xs hover:border-primary transition-colors"
               title={user.email ?? 'プロフィール'}
             >
               {user.user_metadata?.full_name
                 ? user.user_metadata.full_name.slice(0, 1)
-                : user.email?.slice(0, 1).toUpperCase() || <User className="size-4" />}
+                : user.email?.slice(0, 1).toUpperCase() || <User className="size-3.5 sm:size-4" />}
             </Link>
           ) : (
-            <Link href="/login">
-              <Button size="sm" variant="outline" className="h-8 px-2.5 text-xs font-bold gap-1">
-                <User className="size-3.5" />
+            <Link href="/login" className="shrink-0">
+              <Button size="sm" variant="outline" className="h-7 sm:h-8 px-2 sm:px-2.5 text-[11px] sm:text-xs font-bold gap-1">
+                <User className="size-3 sm:size-3.5" />
                 <span>{isJa ? 'ログイン' : 'Sign In'}</span>
               </Button>
             </Link>

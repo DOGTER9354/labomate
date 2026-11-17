@@ -18,6 +18,11 @@ import {
   ShieldCheck,
   FileText,
   HeartHandshake,
+  Smartphone,
+  Download,
+  Share,
+  PlusSquare,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -76,6 +81,43 @@ export function Dashboard() {
   const [userName, setUserName] = useState('周誠')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
+  // PWA（アプリダウンロード）状態管理
+  const [isStandaloneApp, setIsStandaloneApp] = useState(true)
+  const [isIosDevice, setIsIosDevice] = useState(false)
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false)
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+    setIsStandaloneApp(standalone)
+
+    const ua = window.navigator.userAgent.toLowerCase()
+    setIsIosDevice(/iphone|ipad|ipod/.test(ua))
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  }, [])
+
+  const handleDownloadAppClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt()
+      const { outcome } = await deferredPrompt.userChoice
+      if (outcome === 'accepted') {
+        setIsStandaloneApp(true)
+      }
+      setDeferredPrompt(null)
+    } else {
+      setShowIosInstallGuide((prev) => !prev)
+    }
+  }
+
   useEffect(() => {
     const cached = localStorage.getItem(PROFILE_STORAGE_KEY)
     if (cached) {
@@ -88,7 +130,6 @@ export function Dashboard() {
     }
   }, [])
 
-  // Supabase からユーザー自身の応募・参加履歴を同期取得（＋オンライン枠の自動期限切れ判定）
   const fetchUserBookings = useCallback(async () => {
     if (!user) {
       setUserApplications([])
@@ -123,7 +164,6 @@ export function Dashboard() {
             app.slot_id === 'online_survey' ||
             app.slot_time?.includes('オンライン')
 
-          // オンライン調査でまだ回答完了していない「確定」枠の期限切れ判定
           if (isOnline && !isDone && app.status === '確定') {
             const matchedExp = experiments.find((e) => String(e.id) === expId) as any
             const expiryHours = Number(matchedExp?.expiry_hours || matchedExp?.expiryHours || 24)
@@ -131,13 +171,11 @@ export function Dashboard() {
             const elapsedHours = (now - appliedTime) / (1000 * 60 * 60)
 
             if (elapsedHours >= expiryHours) {
-              // 期限切れ！DB を更新
               await supabase
                 .from('applications')
                 .update({ status: '期限切れ（未回答）' })
                 .eq('id', app.id)
 
-              // 実験の残枠数を 1 つ戻す
               if (matchedExp) {
                 const total = Number(matchedExp.spots_total ?? matchedExp.spotsTotal ?? 10)
                 const currentLeft = Number(matchedExp.spots_left ?? matchedExp.spotsLeft ?? 0)
@@ -148,7 +186,7 @@ export function Dashboard() {
                   .update({ spots_left: nextLeft })
                   .eq('id', matchedExp.id)
               }
-              continue // バナーやアクティブ一覧には含めない
+              continue
             }
           }
 
@@ -455,7 +493,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-dvh bg-background text-foreground relative flex flex-col">
+    <div className="min-h-dvh w-full overflow-x-hidden bg-background text-foreground relative flex flex-col">
       <TopNav
         query={query}
         onQueryChange={setQuery}
@@ -465,7 +503,7 @@ export function Dashboard() {
         userName={userName}
       />
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6 flex-1 w-full">
+      <main className="mx-auto max-w-7xl px-3.5 py-5 sm:px-6 lg:px-8 lg:py-8 space-y-5 sm:space-y-6 flex-1 w-full">
         {/* 最上部：セッション別ダッシュボード */}
         <div className="space-y-4">
           {/* ① 学内対面実験セッション */}
@@ -635,11 +673,11 @@ export function Dashboard() {
           {/* どちらも予約がない場合 */}
           {!nextInPersonBooking && !nextOnlineBooking && (
             <div className="rounded-xl border border-dashed bg-card/60 p-3 sm:p-4 flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5">
-                <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   <Calendar className="size-4" />
                 </span>
-                <div>
+                <div className="min-w-0">
                   <p className="font-semibold text-foreground">
                     {isJa ? '現在、参加予定・回答待ちの実験はありません' : 'No upcoming sessions'}
                   </p>
@@ -652,22 +690,22 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* 2大カテゴリ切り替えタブ */}
-        <div className="rounded-2xl border bg-card/60 p-2 shadow-sm backdrop-blur">
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+        {/* 2大カテゴリ切り替えタブ ＋ アプリダウンロードバナー */}
+        <div className="rounded-2xl border bg-card/60 p-2 sm:p-2.5 shadow-sm backdrop-blur">
+          <div className="grid grid-cols-3 gap-1 sm:gap-2">
             <button
               type="button"
               onClick={() => setModeTab('all')}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              className={`flex items-center justify-center gap-1 sm:gap-2 py-2 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-[11px] sm:text-sm font-bold transition-all ${
                 modeTab === 'all'
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
               }`}
             >
-              <span>{isJa ? 'すべて表示' : 'All Studies'}</span>
+              <span className="truncate">{isJa ? 'すべて' : 'All'}</span>
               <Badge
                 variant="secondary"
-                className={`text-[10px] px-1.5 py-0 ${
+                className={`text-[10px] px-1.5 py-0 shrink-0 ${
                   modeTab === 'all'
                     ? 'bg-primary-foreground/20 text-primary-foreground'
                     : 'bg-muted text-muted-foreground'
@@ -680,17 +718,17 @@ export function Dashboard() {
             <button
               type="button"
               onClick={() => setModeTab('in-person')}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              className={`flex items-center justify-center gap-1 sm:gap-2 py-2 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-[11px] sm:text-sm font-bold transition-all ${
                 modeTab === 'in-person'
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
               }`}
             >
-              <Building2 className="size-4" />
-              <span>{isJa ? '学内対面実験' : 'In-Person Lab'}</span>
+              <Building2 className="size-3.5 sm:size-4 shrink-0" />
+              <span className="truncate">{isJa ? '学内対面' : 'In-Person'}</span>
               <Badge
                 variant="secondary"
-                className={`text-[10px] px-1.5 py-0 ${
+                className={`text-[10px] px-1.5 py-0 shrink-0 ${
                   modeTab === 'in-person'
                     ? 'bg-primary-foreground/20 text-primary-foreground'
                     : 'bg-muted text-muted-foreground'
@@ -703,17 +741,17 @@ export function Dashboard() {
             <button
               type="button"
               onClick={() => setModeTab('online')}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              className={`flex items-center justify-center gap-1 sm:gap-2 py-2 sm:py-2.5 px-1.5 sm:px-3 rounded-xl text-[11px] sm:text-sm font-bold transition-all ${
                 modeTab === 'online'
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
               }`}
             >
-              <Globe2 className="size-4" />
-              <span>{isJa ? 'オンライン回答' : 'Online Survey'}</span>
+              <Globe2 className="size-3.5 sm:size-4 shrink-0" />
+              <span className="truncate">{isJa ? 'オンライン' : 'Online'}</span>
               <Badge
                 variant="secondary"
-                className={`text-[10px] px-1.5 py-0 ${
+                className={`text-[10px] px-1.5 py-0 shrink-0 ${
                   modeTab === 'online'
                     ? 'bg-primary-foreground/20 text-primary-foreground'
                     : 'bg-muted text-muted-foreground'
@@ -724,32 +762,89 @@ export function Dashboard() {
             </button>
           </div>
 
-          <div className="mt-2 pt-2 border-t flex flex-wrap items-center justify-between px-2 text-[11px] text-muted-foreground gap-1">
-            <div className="flex items-center gap-2 text-foreground/80 font-medium">
-              <ShieldCheck className="size-3.5 text-primary" />
-              <span>
-                {isJa
-                  ? '大学内の正規研究室・プロジェクトによる被験者募集プラットフォーム'
-                  : 'Official Academic Research Platform for Universities'}
-              </span>
+          <div className="mt-2 pt-2 border-t flex flex-col sm:flex-row sm:items-center justify-between px-1.5 sm:px-2 text-[11px] text-muted-foreground gap-2">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5 text-foreground/80 font-medium">
+                <ShieldCheck className="size-3.5 text-primary shrink-0" />
+                <span>
+                  {isJa
+                    ? '大学内の正規研究室・プロジェクトによる被験者募集プラットフォーム'
+                    : 'Official Academic Research Platform for Universities'}
+                </span>
+              </div>
+              <p className="text-[10px] pl-5">
+                {isJa ? '各実験の参加条件・倫理配慮事項をご確認の上ご参加ください' : 'Please check study requirements and guidelines before joining'}
+              </p>
             </div>
-            <span className="text-[10px]">
-              {isJa ? '各実験の参加条件・倫理配慮事項をご確認の上ご参加ください' : 'Please check study requirements and guidelines before joining'}
-            </span>
+
+            {/* ★ ブラウザアクセス時のみ表示される「アプリをダウンロード」ボタン */}
+            {!isStandaloneApp && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleDownloadAppClick}
+                className="h-8 px-3 text-xs font-bold gap-1.5 border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 shrink-0 self-start sm:self-auto"
+              >
+                <Smartphone className="size-3.5" />
+                <span>{isJa ? 'アプリをダウンロード' : 'Download App'}</span>
+                <Download className="size-3" />
+              </Button>
+            )}
           </div>
+
+          {/* ★ iOS / 手動インストール手順展開ガイド */}
+          {!isStandaloneApp && showIosInstallGuide && (
+            <div className="mt-2.5 p-3 rounded-xl bg-primary/5 border border-primary/25 text-xs space-y-2 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-primary flex items-center gap-1.5">
+                  <Smartphone className="size-4" />
+                  <span>スマホのホーム画面にアプリとして追加（無料・10秒）</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowIosInstallGuide(false)}
+                  className="text-muted-foreground hover:text-foreground p-0.5"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+
+              {isIosDevice ? (
+                <div className="space-y-1.5 text-[11px] text-foreground">
+                  <p className="flex items-center gap-1.5">
+                    <span className="flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold shrink-0">1</span>
+                    <span>
+                      Safariの画面下部にある共有ボタン <Share className="size-3.5 text-blue-500 inline mx-0.5" /> をタップ
+                    </span>
+                  </p>
+                  <p className="flex items-center gap-1.5">
+                    <span className="flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold shrink-0">2</span>
+                    <span>
+                      メニュー内の「<PlusSquare className="size-3.5 inline mx-0.5" /> <strong>ホーム画面に追加</strong>」をタップして完了！
+                    </span>
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-foreground">
+                  ブラウザの右上メニュー（⋮）から<strong>「アプリをインストール」</strong>または<strong>「ホーム画面に追加」</strong>を選択すると、アプリとして起動できます。
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* リストヘッダー & 🔃 リロードボタン */}
-        <div className="flex items-center justify-between gap-2 pt-2">
+        <div className="flex items-center justify-between gap-2 pt-1">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-balance text-foreground sm:text-2xl">
+            <h1 className="text-lg sm:text-2xl font-semibold tracking-tight text-balance text-foreground">
               {modeTab === 'in-person'
                 ? isJa ? '学内対面実験一覧' : 'In-Person Lab Studies'
                 : modeTab === 'online'
                 ? isJa ? 'オンライン回答・調査一覧' : 'Online Surveys & Studies'
                 : isJa ? '現在募集中の実験・調査' : 'Active Studies'}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground">
               {visible.length} {t('studiesCount')}
               {filter !== 'all' && ` · ${filterLabel}`}
               {query.trim() && ` · matching "${query.trim()}"`}
