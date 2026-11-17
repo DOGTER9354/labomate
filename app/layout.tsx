@@ -11,6 +11,12 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'CoLabo (コラボ) | 学内研究・プロジェクト共創プラットフォーム',
   description: '慶應義塾大学SFCのための被験者募集＆プロジェクトメンバーマッチングプラットフォーム',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'CoLabo',
+  },
   icons: {
     icon: '/colabo-icon.png',
     shortcut: '/colabo-icon.png',
@@ -45,6 +51,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  themeColor: '#09090b',
 }
 
 export default function RootLayout({
