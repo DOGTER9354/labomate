@@ -5,6 +5,7 @@ import { LanguageProvider } from '@/lib/language-context'
 import { ThemeProvider } from '@/lib/theme-context'
 import { AuthProvider } from '@/lib/auth-context'
 import { BottomNav } from '@/components/labomate/bottom-nav'
+import { PwaInstallBanner } from '@/components/labomate/pwa-install-banner'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -66,6 +67,7 @@ export default function RootLayout({
           <AuthProvider>
             <LanguageProvider>
               {children}
+              <PwaInstallBanner />
               <BottomNav />
             </LanguageProvider>
           </AuthProvider>
