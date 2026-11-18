@@ -4,6 +4,7 @@ import './globals.css'
 import { LanguageProvider } from '@/lib/language-context'
 import { ThemeProvider } from '@/lib/theme-context'
 import { AuthProvider } from '@/lib/auth-context'
+import { FontSizeProvider } from '@/lib/font-size-context'
 import { BottomNav } from '@/components/labomate/bottom-nav'
 import { PwaInstallBanner } from '@/components/labomate/pwa-install-banner'
 
@@ -64,13 +65,15 @@ export default function RootLayout({
     <html lang="ja" suppressHydrationWarning className="overflow-x-hidden">
       <body className={`${inter.className} min-h-dvh w-full overflow-x-hidden bg-background text-foreground antialiased selection:bg-primary/20`}>
         <ThemeProvider>
-          <AuthProvider>
-            <LanguageProvider>
-              {children}
-              <PwaInstallBanner />
-              <BottomNav />
-            </LanguageProvider>
-          </AuthProvider>
+          <FontSizeProvider>
+            <AuthProvider>
+              <LanguageProvider>
+                {children}
+                <PwaInstallBanner />
+                <BottomNav />
+              </LanguageProvider>
+            </AuthProvider>
+          </FontSizeProvider>
         </ThemeProvider>
       </body>
     </html>

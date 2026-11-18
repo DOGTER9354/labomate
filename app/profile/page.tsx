@@ -42,6 +42,7 @@ import {
   RotateCcw,
   UserCheck,
   Scale,
+  Type,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -55,6 +56,7 @@ import {
 } from '@/components/ui/dialog'
 import { useLanguage } from '@/lib/language-context'
 import { useTheme } from '@/lib/theme-context'
+import { useFontSize } from '@/lib/font-size-context'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 import { AuthGuardDialog } from '@/components/labomate/auth-guard-dialog'
@@ -72,7 +74,6 @@ interface ProfileData {
   email: string
   faculty: string
   grade: string
-  // 基本属性
   dominantHand: string
   vision: string
   gender: string
@@ -114,6 +115,7 @@ export default function ProfilePage() {
   const { language, setLanguage } = useLanguage()
   const isJa = language === 'ja'
   const { theme, setTheme } = useTheme()
+  const { fontSize, setFontSize } = useFontSize()
   const { user, signOut } = useAuth()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('basic')
@@ -429,7 +431,7 @@ export default function ProfilePage() {
       } catch (e) {}
     }
     setSavedNotice(isJa ? `${instName} の所属認証が完了しました！` : 'Academic verification completed!')
-    setTimeout(() => setSavedNotice(null), 3505)
+    setTimeout(() => setSavedNotice(null), 3500)
   }
 
   const handleUnlinkAcademic = async () => {
@@ -1025,7 +1027,6 @@ export default function ProfilePage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                {/* 利き手 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">利き手</label>
                   {isEditing ? (
@@ -1048,7 +1049,6 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-                {/* 視力・矯正 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">視力・矯正</label>
                   {isEditing ? (
@@ -1071,7 +1071,6 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-                {/* 性別 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">性別</label>
                   {isEditing ? (
@@ -1094,7 +1093,6 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-                {/* 身長 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">身長 (cm)</label>
                   <Input
@@ -1107,7 +1105,6 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {/* 体重 */}
                 <div className="space-y-1.5">
                   <label className="text-muted-foreground font-medium">体重 (kg)</label>
                   <Input
@@ -1466,6 +1463,49 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* ★ 文字の大きさ設定 (Font Size) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b">
+                <div className="space-y-0.5">
+                  <p className="font-bold text-foreground flex items-center gap-1.5">
+                    <Type className="size-3.5 text-muted-foreground" />
+                    <span>{isJa ? '文字の大きさ (Font Size)' : 'Font Size'}</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {fontSize === 'normal'
+                      ? isJa ? '標準サイズ（デフォルト）' : 'Standard size'
+                      : fontSize === 'large'
+                      ? isJa ? '大きめ（読みやすさ重視・112.5%）' : 'Large (112.5%)'
+                      : isJa ? '特大（最大サイズ・125%）' : 'Extra Large (125%)'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant={fontSize === 'normal' ? 'default' : 'outline'}
+                    onClick={() => setFontSize('normal')}
+                    className="h-7 px-2.5 text-xs font-semibold"
+                  >
+                    <span>{isJa ? '標準' : 'Normal'}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={fontSize === 'large' ? 'default' : 'outline'}
+                    onClick={() => setFontSize('large')}
+                    className="h-7 px-2.5 text-xs font-semibold"
+                  >
+                    <span>{isJa ? '大きめ' : 'Large'}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={fontSize === 'xlarge' ? 'default' : 'outline'}
+                    onClick={() => setFontSize('xlarge')}
+                    className="h-7 px-2.5 text-xs font-semibold"
+                  >
+                    <span>{isJa ? '特大' : 'XL'}</span>
+                  </Button>
+                </div>
+              </div>
+
               {user && (
                 <div className="flex items-center justify-between pt-1">
                   <div className="space-y-0.5">
@@ -1507,9 +1547,9 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">被験者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験・調査への参加ステップ</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-1. 「探す」から空きコマや関心のある実験・調査を検索<br />
-2. 希望の時間帯スロットを選択して応募確定<br />
-3. 当日に会場またはオンラインで参加し、謝礼を受領
+                    1. 「探す」から空きコマや関心のある実験・調査を検索<br />
+                    2. 希望の時間帯スロットを選択して応募確定<br />
+                    3. 当日に会場またはオンラインで参加し、謝礼を受領
                   </p>
                 </div>
 
@@ -1517,9 +1557,9 @@ export default function ProfilePage() {
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">研究者向け</Badge>
                   <h4 className="font-bold text-foreground text-sm">実験募集・参加枠の管理</h4>
                   <p className="text-muted-foreground leading-relaxed text-[11px]">
-1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
-2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
-3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
+                    1. 「募集」タブから新規の対面実験またはアンケートを作成<br />
+                    2. 実施場所・所要時間・謝礼内容・募集スロット枠を設定<br />
+                    3. 応募状況のリアルタイム確認や不要になった募集の取り下げが可能
                   </p>
                 </div>
               </div>
