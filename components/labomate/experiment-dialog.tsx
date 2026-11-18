@@ -40,6 +40,7 @@ import {
   Scale,
   Share2,
   Check,
+  Copy,
 } from 'lucide-react'
 import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
@@ -260,7 +261,21 @@ export function ExperimentDialog({
     expAny.format?.includes('オンライン')
   )
 
-  const handleShareExperiment = async () => {
+  // ★ 単純にURLをクリップボードにコピーする
+  const handleCopyShareLink = async () => {
+    if (typeof window === 'undefined') return
+    const shareUrl = `${window.location.origin}/?exp=${experiment.id}`
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopiedShareUrl(true)
+      setTimeout(() => setCopiedShareUrl(false), 2500)
+    } catch (e) {
+      console.error('Copy failed:', e)
+    }
+  }
+
+  // ★ OSの共有シート（AirDrop / LINE / Messages等）を開く
+  const handleNativeShare = async () => {
     if (typeof window === 'undefined') return
     const shareUrl = `${window.location.origin}/?exp=${experiment.id}`
     const shareText = `【CoLabo 募集】${experiment.title}`
@@ -274,16 +289,10 @@ export function ExperimentDialog({
         })
         return
       } catch (e) {
-        // キャンセル時はクリップボードコピーへフォールバック
+        // キャンセル時は何もしない
       }
-    }
-
-    try {
-      await navigator.clipboard.writeText(shareUrl)
-      setCopiedShareUrl(true)
-      setTimeout(() => setCopiedShareUrl(false), 2500)
-    } catch (e) {
-      console.error('Copy failed:', e)
+    } else {
+      handleCopyShareLink()
     }
   }
 
@@ -679,27 +688,41 @@ export function ExperimentDialog({
               )}
             </div>
 
-            {/* ★ 共有ボタン（URLコピー / OSシェア） */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleShareExperiment}
-              className="h-7 px-2.5 text-[11px] font-bold gap-1 shrink-0"
-              title="この募集のリンクを共有"
-            >
-              {copiedShareUrl ? (
-                <>
-                  <Check className="size-3 text-emerald-500" />
-                  <span className="text-emerald-600 dark:text-emerald-400">コピー済み</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="size-3" />
-                  <span>共有</span>
-                </>
-              )}
-            </Button>
+            {/* ★ 「リンクコピー」と「共有（アプリ連携）」の2ボタン */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleCopyShareLink}
+                className="h-7 px-2 text-[11px] font-bold gap-1"
+                title="募集ページのURLをコピー"
+              >
+                {copiedShareUrl ? (
+                  <>
+                    <Check className="size-3 text-emerald-500" />
+                    <span className="text-emerald-600 dark:text-emerald-400">コピー完了</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="size-3" />
+                    <span>リンクコピー</span>
+                  </>
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleNativeShare}
+                className="h-7 px-2 text-[11px] font-bold gap-1"
+                title="アプリで共有"
+              >
+                <Share2 className="size-3" />
+                <span className="hidden sm:inline">共有</span>
+              </Button>
+            </div>
           </div>
 
           <p className="text-xs text-muted-foreground font-medium">

@@ -86,7 +86,7 @@ export function CreateExperimentDialog({
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // ★ 作成完了後の共有リンク表示用ステート
+  // 作成完了後の共有リンク表示用ステート
   const [createdShareUrl, setCreatedShareUrl] = useState<string | null>(null)
   const [createdIsPrivate, setCreatedIsPrivate] = useState<boolean>(false)
   const [copiedLink, setCopiedLink] = useState(false)
@@ -433,7 +433,6 @@ export function CreateExperimentDialog({
       return
     }
 
-    // 限定公開（クローズ面談など）のときは事前知識アラートをスキップ
     if (!isPrivate && !filterPriorKnowledge) {
       setConfirmWarningOpen(true)
       return
@@ -570,7 +569,6 @@ export function CreateExperimentDialog({
         onSuccess()
       }
 
-      // 新規作成でIDが取得できた場合、共有リンク画面を表示
       if (!isEditing && savedRecordId && typeof window !== 'undefined') {
         const shareUrl = `${window.location.origin}/?exp=${savedRecordId}`
         setCreatedShareUrl(shareUrl)
@@ -614,11 +612,11 @@ export function CreateExperimentDialog({
                 <DialogTitle className="text-lg font-bold text-foreground">
                   {createdIsPrivate
                     ? '限定公開（クローズ案件）を作成しました！'
-                    : '募集を公開しました！'}
+                    : '実験募集を公開しました！'}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
                   {createdIsPrivate
-                    ? 'この募集はトップ画面の一覧には表示されません。下記の専用リンクを共有した相手だけがアクセスして応募・日程予約できます。'
+                    ? 'この募集はトップ画面の一覧には表示されません。下記の専用リンクを共有した相手だけがアクセスして参加できます。'
                     : 'トップ画面の一覧に公開されました。下記の個別リンクをSNSやLINEグループに貼ると、直接この募集モーダルが開きます。'}
                 </DialogDescription>
               </div>
@@ -641,7 +639,7 @@ export function CreateExperimentDialog({
                     className="h-9 px-3.5 text-xs font-bold gap-1.5 shrink-0 bg-primary text-primary-foreground"
                   >
                     {copiedLink ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    <span>{copiedLink ? 'コピー完了' : 'コピー'}</span>
+                    <span>{copiedLink ? 'コピー完了' : 'リンクコピー'}</span>
                   </Button>
                 </div>
               </div>
@@ -665,13 +663,13 @@ export function CreateExperimentDialog({
                     {isEditing ? <Edit3 className="size-4" /> : <Sparkles className="size-4" />}
                   </span>
                   <DialogTitle className="text-lg font-bold text-foreground">
-                    {isEditing ? '実験・プロジェクト募集を編集' : '新規の募集を作成'}
+                    {isEditing ? '実験募集を編集' : '新規の被験者募集を作成'}
                   </DialogTitle>
                 </div>
                 <DialogDescription className="text-xs text-muted-foreground">
                   {isEditing
                     ? '募集内容や公開範囲、参加枠を更新します。'
-                    : '対面実験・面談スロット、またはオンラインアンケートの募集要項を設定します。'}
+                    : '対面実験またはオンラインアンケートの募集要項と参加枠を設定します。'}
                 </DialogDescription>
               </DialogHeader>
 
@@ -688,7 +686,7 @@ export function CreateExperimentDialog({
                     }`}
                   >
                     <Building2 className="size-4" />
-                    <span>対面実験・面談スロット</span>
+                    <span>学内対面実験</span>
                   </button>
                   <button
                     type="button"
@@ -700,11 +698,11 @@ export function CreateExperimentDialog({
                     }`}
                   >
                     <Globe2 className="size-4" />
-                    <span>オンラインアンケート・応募</span>
+                    <span>オンラインアンケート</span>
                   </button>
                 </div>
 
-                {/* ★ 公開範囲設定（全体公開 / 限定公開・クローズ案件） */}
+                {/* 公開範囲設定（全体公開 / 限定公開・クローズ案件） */}
                 <div className="p-4 rounded-xl border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                   <div className="space-y-0.5">
                     <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -717,7 +715,7 @@ export function CreateExperimentDialog({
                     </p>
                     <p className="text-[11px] text-muted-foreground leading-snug">
                       {isPrivate
-                        ? '一覧画面には非表示になり、発行された専用URLを知っている人だけがアクセス・予約できます（面談日程調整・ゼミ内限定調査向け）。'
+                        ? '一覧画面には非表示になり、発行された専用URLを知っている人だけがアクセス・参加できます（ゼミ内・関係者限定実験向け）。'
                         : 'トップ画面の募集一覧に表示され、全ユーザーが閲覧・応募できます。'}
                     </p>
                   </div>
@@ -750,7 +748,7 @@ export function CreateExperimentDialog({
 
                 {/* 実験タイトル */}
                 <div className="space-y-1.5 text-xs">
-                  <Label className="font-bold text-foreground">募集タイトル *</Label>
+                  <Label className="font-bold text-foreground">実験タイトル *</Label>
                   <Input
                     required
                     placeholder="例: 意思決定における視覚刺激の影響に関する認知実験"
@@ -760,9 +758,9 @@ export function CreateExperimentDialog({
                   />
                 </div>
 
-                {/* 概要・詳細説明 */}
+                {/* 実験概要・詳細説明 */}
                 <div className="space-y-1.5 text-xs">
-                  <Label className="font-bold text-foreground">募集概要・詳細（任意）</Label>
+                  <Label className="font-bold text-foreground">実験概要・詳細（任意）</Label>
                   <textarea
                     rows={3}
                     placeholder="実験の内容、持ち物、当日の流れなどを記載してください。"
@@ -781,7 +779,7 @@ export function CreateExperimentDialog({
                     </Label>
                     <Input
                       required
-                      placeholder="例: SFC 認知科学研究室 / CoLabo 運営事務局"
+                      placeholder="例: SFC 認知科学研究室"
                       value={labName}
                       onChange={(e) => setLabName(e.target.value)}
                       className="text-xs h-10"
@@ -791,12 +789,12 @@ export function CreateExperimentDialog({
                   {mode === 'in-person' ? (
                     <div className="space-y-1.5">
                       <Label className="font-bold text-foreground flex items-center gap-1">
-                        <span>実施場所（教室・ラボ・オンラインURL等）</span>
+                        <span>実施場所（教室・ラボ）</span>
                         <span className="text-rose-500">*</span>
                       </Label>
                       <Input
                         required
-                        placeholder="例: SFC オミクロン館 2F / オンライン (Discord)"
+                        placeholder="例: SFC オミクロン館 2F / メディアセンター 1F"
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
                         className="text-xs h-10"
@@ -924,7 +922,7 @@ export function CreateExperimentDialog({
                     </div>
                   </div>
                 ) : (
-                  /* 学内対面実験・面談用 */
+                  /* 学内対面実験用 */
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
                       <div className="space-y-1.5">
@@ -1315,7 +1313,7 @@ export function CreateExperimentDialog({
                   )}
                 </div>
 
-                {/* スロット設定（対面実験・面談の場合） */}
+                {/* スロット設定（対面実験の場合） */}
                 {mode === 'in-person' && (
                   <div className="space-y-4 border-t pt-4">
                     <div className="flex items-center justify-between">
