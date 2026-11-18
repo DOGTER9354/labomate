@@ -34,6 +34,11 @@ import {
   Eye,
   Scale,
   CalendarDays,
+  Link2,
+  Lock,
+  CheckCircle2,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -81,7 +86,13 @@ export function CreateExperimentDialog({
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  // ★ 作成完了後の共有リンク表示用ステート
+  const [createdShareUrl, setCreatedShareUrl] = useState<string | null>(null)
+  const [createdIsPrivate, setCreatedIsPrivate] = useState<boolean>(false)
+  const [copiedLink, setCopiedLink] = useState(false)
+
   const [mode, setMode] = useState<'in-person' | 'online'>('in-person')
+  const [isPrivate, setIsPrivate] = useState<boolean>(false)
   const [title, setTitle] = useState('')
   const [labName, setLabName] = useState('')
   const [location, setLocation] = useState('')
@@ -93,7 +104,7 @@ export function CreateExperimentDialog({
   const [surveyUrl, setSurveyUrl] = useState('')
   const [expiryHours, setExpiryHours] = useState('24')
 
-  // ★ オンライン回答の全体締切日（YYYY-MM-DD）
+  // オンライン回答の全体締切日（YYYY-MM-DD）
   const [onlineClosingDate, setOnlineClosingDate] = useState<string>('')
   const [hasClosingDate, setHasClosingDate] = useState<boolean>(false)
 
@@ -175,6 +186,10 @@ export function CreateExperimentDialog({
   useEffect(() => {
     if (!open) return
 
+    setCreatedShareUrl(null)
+    setCopiedLink(false)
+    setErrorMsg(null)
+
     const today = new Date()
     const year = today.getFullYear()
     const month = String(today.getMonth() + 1).padStart(2, '0')
@@ -193,6 +208,7 @@ export function CreateExperimentDialog({
     if (initialData) {
       const isOnline = initialData.format === 'オンライン' || Boolean(initialData.survey_url)
       setMode(isOnline ? 'online' : 'in-person')
+      setIsPrivate(Boolean(initialData.is_private || initialData.isPrivate))
       setTitle(initialData.title || '')
       setLabName(initialData.lab_name || initialData.labName || '')
       setLocation(initialData.location || '')
@@ -257,6 +273,7 @@ export function CreateExperimentDialog({
       setIsTotalManuallyEdited(true)
     } else {
       setMode('in-person')
+      setIsPrivate(false)
       setTitle('')
       setLabName('')
       setLocation('')
@@ -416,7 +433,8 @@ export function CreateExperimentDialog({
       return
     }
 
-    if (!filterPriorKnowledge) {
+    // 限定公開（クローズ面談など）のときは事前知識アラートをスキップ
+    if (!isPrivate && !filterPriorKnowledge) {
       setConfirmWarningOpen(true)
       return
     }
@@ -487,6 +505,7 @@ export function CreateExperimentDialog({
         spots_total: totalSpots,
         allow_multiple_slots: allowMultipleSlots,
         requires_keio_badge: requiresKeioBadge,
+        is_private: isPrivate,
         requirements: generatedRequirements,
         filter_prior_knowledge: filterPriorKnowledge,
         filter_same_lab: filterSameLab,
@@ -495,6 +514,8 @@ export function CreateExperimentDialog({
         custom_qualifications: customQualifications,
         slots: formattedSlots,
       }
+
+      let savedRecordId: string | null = isEditing ? String(initialData.id) : null
 
       const attemptSave = async (payload: any) => {
         if (isEditing) {
@@ -510,7 +531,15 @@ export function CreateExperimentDialog({
             payload.created_by = user.id
           }
 
-          const { error } = await supabase.from('experiments').insert(payload)
+          const { data: insertedData, error } = await supabase
+            .from('experiments')
+            .insert(payload)
+            .select('id')
+            .single()
+
+          if (!error && insertedData?.id) {
+            savedRecordId = String(insertedData.id)
+          }
           return error
         }
       }
@@ -541,13 +570,31 @@ export function CreateExperimentDialog({
         onSuccess()
       }
 
-      onOpenChange(false)
+      // 新規作成でIDが取得できた場合、共有リンク画面を表示
+      if (!isEditing && savedRecordId && typeof window !== 'undefined') {
+        const shareUrl = `${window.location.origin}/?exp=${savedRecordId}`
+        setCreatedShareUrl(shareUrl)
+        setCreatedIsPrivate(isPrivate)
+      } else {
+        onOpenChange(false)
+      }
     } catch (err: any) {
       console.error('Save experiment error:', err)
       setErrorMsg(err.message || '募集の保存に失敗しました。')
     } finally {
       setLoading(false)
       setConfirmWarningOpen(false)
+    }
+  }
+
+  const handleCopyCreatedUrl = async () => {
+    if (!createdShareUrl) return
+    try {
+      await navigator.clipboard.writeText(createdShareUrl)
+      setCopiedLink(true)
+      setTimeout(() => setCopiedLink(false), 2500)
+    } catch (e) {
+      console.error(e)
     }
   }
 
@@ -558,813 +605,925 @@ export function CreateExperimentDialog({
           style={{ maxWidth: '840px', width: '92vw' }}
           className="max-h-[90dvh] overflow-y-auto p-5 sm:p-7"
         >
-          <DialogHeader className="space-y-1.5 pb-2">
-            <div className="flex items-center gap-2.5">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                {isEditing ? <Edit3 className="size-4" /> : <Sparkles className="size-4" />}
-              </span>
-              <DialogTitle className="text-lg font-bold text-foreground">
-                {isEditing ? '実験募集を編集' : '新規の被験者募集を作成'}
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-xs text-muted-foreground">
-              {isEditing
-                ? '募集内容や枠数、参加条件を更新します。'
-                : '対面実験またはオンラインアンケートの募集要項と参加枠を設定します。'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handlePreSubmit} className="space-y-5 pt-1">
-            {/* 実施形式選択 */}
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => handleModeChange('in-person')}
-                className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
-                  mode === 'in-person'
-                    ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
-                    : 'bg-card text-muted-foreground hover:bg-muted/40'
-                }`}
-              >
-                <Building2 className="size-4" />
-                <span>学内対面実験</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange('online')}
-                className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
-                  mode === 'online'
-                    ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
-                    : 'bg-card text-muted-foreground hover:bg-muted/40'
-                }`}
-              >
-                <Globe2 className="size-4" />
-                <span>オンラインアンケート</span>
-              </button>
-            </div>
-
-            {/* 実験タイトル */}
-            <div className="space-y-1.5 text-xs">
-              <Label className="font-bold text-foreground">実験タイトル *</Label>
-              <Input
-                required
-                placeholder="例: 意思決定における視覚刺激の影響に関する認知実験"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="text-xs h-10"
-              />
-            </div>
-
-            {/* 研究室名 & 実施場所 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          {createdShareUrl ? (
+            <div className="py-8 px-2 text-center space-y-5 animate-in fade-in zoom-in-95 duration-200">
+              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
+                <CheckCircle2 className="size-8" />
+              </div>
               <div className="space-y-1.5">
-                <Label className="font-bold text-foreground flex items-center gap-1">
-                  <span>研究室名・プロジェクト名</span>
-                  <span className="text-rose-500">*</span>
-                </Label>
-                <Input
-                  required
-                  placeholder="例: SFC 認知科学研究室"
-                  value={labName}
-                  onChange={(e) => setLabName(e.target.value)}
-                  className="text-xs h-10"
-                />
+                <DialogTitle className="text-lg font-bold text-foreground">
+                  {createdIsPrivate
+                    ? '限定公開（クローズ案件）を作成しました！'
+                    : '募集を公開しました！'}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                  {createdIsPrivate
+                    ? 'この募集はトップ画面の一覧には表示されません。下記の専用リンクを共有した相手だけがアクセスして応募・日程予約できます。'
+                    : 'トップ画面の一覧に公開されました。下記の個別リンクをSNSやLINEグループに貼ると、直接この募集モーダルが開きます。'}
+                </DialogDescription>
               </div>
 
-              {mode === 'in-person' ? (
-                <div className="space-y-1.5">
-                  <Label className="font-bold text-foreground flex items-center gap-1">
-                    <span>実施場所（教室・ラボ）</span>
-                    <span className="text-rose-500">*</span>
-                  </Label>
+              <div className="max-w-md mx-auto p-3.5 rounded-2xl border bg-muted/30 space-y-2.5 text-left">
+                <span className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                  <Link2 className="size-3.5 text-primary" />
+                  <span>{createdIsPrivate ? '限定公開・招待用リンク' : 'この募集の個別共有リンク'}</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={createdShareUrl}
+                    className="text-xs font-mono bg-background h-9"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleCopyCreatedUrl}
+                    className="h-9 px-3.5 text-xs font-bold gap-1.5 shrink-0 bg-primary text-primary-foreground"
+                  >
+                    {copiedLink ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                    <span>{copiedLink ? 'コピー完了' : 'コピー'}</span>
+                  </Button>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  className="h-9 px-6 text-xs font-bold"
+                >
+                  閉じる
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <DialogHeader className="space-y-1.5 pb-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    {isEditing ? <Edit3 className="size-4" /> : <Sparkles className="size-4" />}
+                  </span>
+                  <DialogTitle className="text-lg font-bold text-foreground">
+                    {isEditing ? '実験・プロジェクト募集を編集' : '新規の募集を作成'}
+                  </DialogTitle>
+                </div>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  {isEditing
+                    ? '募集内容や公開範囲、参加枠を更新します。'
+                    : '対面実験・面談スロット、またはオンラインアンケートの募集要項を設定します。'}
+                </DialogDescription>
+              </DialogHeader>
+
+              <form onSubmit={handlePreSubmit} className="space-y-5 pt-1">
+                {/* 実施形式選択 */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleModeChange('in-person')}
+                    className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
+                      mode === 'in-person'
+                        ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
+                        : 'bg-card text-muted-foreground hover:bg-muted/40'
+                    }`}
+                  >
+                    <Building2 className="size-4" />
+                    <span>対面実験・面談スロット</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleModeChange('online')}
+                    className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
+                      mode === 'online'
+                        ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
+                        : 'bg-card text-muted-foreground hover:bg-muted/40'
+                    }`}
+                  >
+                    <Globe2 className="size-4" />
+                    <span>オンラインアンケート・応募</span>
+                  </button>
+                </div>
+
+                {/* ★ 公開範囲設定（全体公開 / 限定公開・クローズ案件） */}
+                <div className="p-4 rounded-xl border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-foreground flex items-center gap-1.5">
+                      {isPrivate ? (
+                        <Lock className="size-4 text-amber-500" />
+                      ) : (
+                        <Globe2 className="size-4 text-primary" />
+                      )}
+                      <span>公開範囲：{isPrivate ? '限定公開（クローズ案件）' : '全体公開（一覧に表示）'}</span>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      {isPrivate
+                        ? '一覧画面には非表示になり、発行された専用URLを知っている人だけがアクセス・予約できます（面談日程調整・ゼミ内限定調査向け）。'
+                        : 'トップ画面の募集一覧に表示され、全ユーザーが閲覧・応募できます。'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsPrivate(false)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                        !isPrivate
+                          ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                          : 'bg-muted/40 text-muted-foreground border-border hover:bg-muted'
+                      }`}
+                    >
+                      全体公開
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsPrivate(true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1 ${
+                        isPrivate
+                          ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                          : 'bg-muted/40 text-muted-foreground border-border hover:bg-muted'
+                      }`}
+                    >
+                      <Lock className="size-3" />
+                      <span>限定公開</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 実験タイトル */}
+                <div className="space-y-1.5 text-xs">
+                  <Label className="font-bold text-foreground">募集タイトル *</Label>
                   <Input
                     required
-                    placeholder="例: SFC オミクロン館 2F / メディアセンター 1F"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="例: 意思決定における視覚刺激の影響に関する認知実験"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
                     className="text-xs h-10"
                   />
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label className="font-bold text-foreground flex items-center gap-1">
-                    <span>回答URL（Google Forms等）</span>
-                    <span className="text-rose-500">*</span>
-                  </Label>
-                  <Input
-                    required
-                    placeholder="https://forms.gle/..."
-                    value={surveyUrl}
-                    onChange={(e) => setSurveyUrl(e.target.value)}
-                    className="text-xs font-mono h-10"
+
+                {/* 概要・詳細説明 */}
+                <div className="space-y-1.5 text-xs">
+                  <Label className="font-bold text-foreground">募集概要・詳細（任意）</Label>
+                  <textarea
+                    rows={3}
+                    placeholder="実験の内容、持ち物、当日の流れなどを記載してください。"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background p-2.5 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none"
                   />
                 </div>
-              )}
-            </div>
 
-            {/* オンラインアンケート用設定エリア */}
-            {mode === 'online' ? (
-              <div className="space-y-4">
-                <div className="p-3.5 rounded-xl border bg-muted/20 flex items-start gap-2.5 text-xs">
-                  <HeartHandshake className="size-4 text-primary shrink-0 mt-0.5" />
-                  <div className="space-y-0.5">
-                    <p className="font-bold text-foreground">オンライン回答の謝礼について</p>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      公費・研究費の監査および規程に準拠するため、オンライン調査は「学内協力・ボランティア型（謝礼なし）」として募集されます。
-                    </p>
-                  </div>
-                </div>
-
+                {/* 研究室名 & 実施場所 */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  {/* 所要時間入力 & クイック選択 */}
                   <div className="space-y-1.5">
                     <Label className="font-bold text-foreground flex items-center gap-1">
-                      <span>目安所要時間（分）</span>
+                      <span>研究室名・プロジェクト名</span>
                       <span className="text-rose-500">*</span>
                     </Label>
                     <Input
-                      type="number"
                       required
-                      min="1"
-                      value={durationMins}
-                      onChange={(e) => setDurationMins(e.target.value)}
-                      className="text-xs h-10 font-bold"
+                      placeholder="例: SFC 認知科学研究室 / CoLabo 運営事務局"
+                      value={labName}
+                      onChange={(e) => setLabName(e.target.value)}
+                      className="text-xs h-10"
                     />
-                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      {COMMON_DURATIONS.map((dur) => (
-                        <button
-                          key={dur}
-                          type="button"
-                          onClick={() => setDurationMins(dur)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
-                            durationMins === dur
-                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                              : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border'
-                          }`}
-                        >
-                          {dur}分
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
-                  {/* 回答有効期限（枠保持時間） */}
-                  <div className="space-y-1.5">
-                    <Label className="font-bold text-foreground flex items-center gap-1">
-                      <Clock className="size-3.5 text-primary" />
-                      <span>回答の有効期限（自動失効時間）</span>
-                    </Label>
-                    <select
-                      value={expiryHours}
-                      onChange={(e) => setExpiryHours(e.target.value)}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      {EXPIRY_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground">
-                      ※ 枠確保後この時間を過ぎても未回答の場合、自動で枠が全体に返却されます。
-                    </p>
-                  </div>
+                  {mode === 'in-person' ? (
+                    <div className="space-y-1.5">
+                      <Label className="font-bold text-foreground flex items-center gap-1">
+                        <span>実施場所（教室・ラボ・オンラインURL等）</span>
+                        <span className="text-rose-500">*</span>
+                      </Label>
+                      <Input
+                        required
+                        placeholder="例: SFC オミクロン館 2F / オンライン (Discord)"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        className="text-xs h-10"
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Label className="font-bold text-foreground flex items-center gap-1">
+                        <span>回答URL（Google Forms等）</span>
+                        <span className="text-rose-500">*</span>
+                      </Label>
+                      <Input
+                        required
+                        placeholder="https://forms.gle/..."
+                        value={surveyUrl}
+                        onChange={(e) => setSurveyUrl(e.target.value)}
+                        className="text-xs font-mono h-10"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* ★ 全体の最終締切日設定（⑥ オンライン回答の最終締切日時） */}
-                <div className="p-3.5 rounded-xl border bg-card space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between">
+                {/* オンラインアンケート用設定エリア */}
+                {mode === 'online' ? (
+                  <div className="space-y-4">
+                    <div className="p-3.5 rounded-xl border bg-muted/20 flex items-start gap-2.5 text-xs">
+                      <HeartHandshake className="size-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-foreground">オンライン回答の謝礼について</p>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          公費・研究費の監査および規程に準拠するため、オンライン調査は「学内協力・ボランティア型（謝礼なし）」として募集されます。
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <span>目安所要時間（分）</span>
+                          <span className="text-rose-500">*</span>
+                        </Label>
+                        <Input
+                          type="number"
+                          required
+                          min="1"
+                          value={durationMins}
+                          onChange={(e) => setDurationMins(e.target.value)}
+                          className="text-xs h-10 font-bold"
+                        />
+                        <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                          {COMMON_DURATIONS.map((dur) => (
+                            <button
+                              key={dur}
+                              type="button"
+                              onClick={() => setDurationMins(dur)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
+                                durationMins === dur
+                                  ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                  : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border'
+                              }`}
+                            >
+                              {dur}分
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <Clock className="size-3.5 text-primary" />
+                          <span>回答の有効期限（自動失効時間）</span>
+                        </Label>
+                        <select
+                          value={expiryHours}
+                          onChange={(e) => setExpiryHours(e.target.value)}
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          {EXPIRY_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-muted-foreground">
+                          ※ 枠確保後この時間を過ぎても未回答の場合、自動で枠が全体に返却されます。
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border bg-card space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <p className="font-bold text-foreground flex items-center gap-1.5">
+                            <CalendarDays className="size-4 text-primary" />
+                            <span>アンケート全体の受付終了日（最終締切日）</span>
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            指定した日付を過ぎると自動的に募集が締め切られ、新規の参加受付が終了します。
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setHasClosingDate((prev) => !prev)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                            hasClosingDate
+                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                              : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                          }`}
+                        >
+                          {hasClosingDate ? '締切日: 設定中' : '期限なし (定員まで)'}
+                        </button>
+                      </div>
+
+                      {hasClosingDate && (
+                        <div className="pt-2 border-t border-border/60 max-w-sm animate-in fade-in">
+                          <Label className="text-[11px] text-muted-foreground font-medium block mb-1">
+                            受付を締め切る日付を選択
+                          </Label>
+                          <SegmentedDatePicker
+                            value={onlineClosingDate}
+                            onChange={(val) => setOnlineClosingDate(val)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* 学内対面実験・面談用 */
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <span>所要時間（分）</span>
+                          <span className="text-rose-500">*</span>
+                        </Label>
+                        <Input
+                          type="number"
+                          required
+                          min="5"
+                          value={durationMins}
+                          onChange={(e) => setDurationMins(e.target.value)}
+                          className="text-xs h-10 font-bold"
+                        />
+                        <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                          {COMMON_DURATIONS.map((dur) => (
+                            <button
+                              key={dur}
+                              type="button"
+                              onClick={() => setDurationMins(dur)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
+                                durationMins === dur
+                                  ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                  : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border'
+                              }`}
+                            >
+                              {dur}分
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <span>謝礼種別</span>
+                          <span className="text-rose-500">*</span>
+                        </Label>
+                        <select
+                          value={rewardType}
+                          onChange={(e) => {
+                            const val = e.target.value
+                            setRewardType(val)
+                            if (val === '謝礼なし') {
+                              setRewardAmount('0')
+                            }
+                          }}
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring font-medium"
+                        >
+                          {REWARD_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <span>謝礼金額（円）</span>
+                          {!isAmountDisabled && <span className="text-rose-500">*</span>}
+                          {isAmountDisabled && <span className="text-[10px] text-muted-foreground font-normal">（不要）</span>}
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          disabled={isAmountDisabled}
+                          value={isAmountDisabled ? '0' : rewardAmount}
+                          onChange={(e) => setRewardAmount(e.target.value)}
+                          className="text-xs h-10 disabled:opacity-40 disabled:bg-muted/40 font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    {rewardType === 'その他' && (
+                      <div className="space-y-1.5 text-xs animate-in fade-in duration-200">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <span>謝礼の詳細（その他）</span>
+                          <span className="text-rose-500">*</span>
+                        </Label>
+                        <Input
+                          required
+                          placeholder="例: 図書カード1,000円分 / 特製ノベルティ・記念品 / カフェチケット"
+                          value={customRewardType}
+                          onChange={(e) => setCustomRewardType(e.target.value)}
+                          className="text-xs h-10"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 慶應認証バッジ限定設定スイッチ */}
+                <div className="p-4 rounded-xl border bg-primary/5 border-primary/20 flex items-start justify-between gap-3 text-xs">
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-foreground flex items-center gap-1.5">
+                      <ShieldCheck className="size-4 text-primary" />
+                      <span>慶應認証バッジ保有者のみ参加可能</span>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      ONにすると、慶應メール（@keio.jp）で認証済みの学生のみが応募できるよう制限されます（推奨）。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRequiresKeioBadge((prev) => !prev)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                      requiresKeioBadge
+                        ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                        : 'bg-muted/60 text-muted-foreground border-border hover:bg-muted'
+                    }`}
+                  >
+                    {requiresKeioBadge ? '慶應限定: ON' : '全ユーザー許可'}
+                  </button>
+                </div>
+
+                {/* 参加資格・倫理チェックボックス設定（アコーディオン式） */}
+                <div className="rounded-xl border bg-card overflow-hidden text-xs transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setIsQualificationsExpanded(!isQualificationsExpanded)}
+                    className="w-full p-4 flex items-center justify-between hover:bg-muted/30 transition-colors text-left"
+                  >
                     <div className="space-y-0.5">
-                      <p className="font-bold text-foreground flex items-center gap-1.5">
-                        <CalendarDays className="size-4 text-primary" />
-                        <span>アンケート全体の受付終了日（最終締切日）</span>
+                      <p className="font-bold text-foreground flex items-center gap-2">
+                        <SlidersHorizontal className="size-4 text-primary" />
+                        <span>参加資格・倫理チェックボックス設定</span>
+                        {activeConditionCount > 0 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/25">
+                            設定中: {activeConditionCount}件
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground font-normal">
+                            （未設定）
+                          </span>
+                        )}
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        指定した日付を過ぎると自動的に募集が締め切られ、新規の参加受付が終了します。
+                        研究倫理、マイページ属性（視力・利き手・性別）、独自条件を指定できます。
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 text-primary font-semibold text-xs ml-2 shrink-0">
+                      <span>{isQualificationsExpanded ? '閉じる' : '開いて設定'}</span>
+                      {isQualificationsExpanded ? (
+                        <ChevronUp className="size-4" />
+                      ) : (
+                        <ChevronDown className="size-4" />
+                      )}
+                    </div>
+                  </button>
+
+                  {isQualificationsExpanded && (
+                    <div className="p-4 pt-1 border-t space-y-4 bg-muted/10 animate-in fade-in duration-200">
+                      <div className="space-y-2.5">
+                        <span className="text-[11px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-wider">
+                          <ShieldCheck className="size-3.5" />
+                          <span>① 研究倫理・バイアス防止</span>
+                        </span>
+
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-background border">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-foreground">
+                                  この研究に関する事前知識がある人の参加はご遠慮ください
+                                </p>
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                  推奨
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">
+                                ゼミや進捗報告などで仮説や実験手順をすでに知っている人の参加を防ぎます。
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setFilterPriorKnowledge((prev) => !prev)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                                filterPriorKnowledge
+                                  ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                  : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                              }`}
+                            >
+                              {filterPriorKnowledge ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+
+                          <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-background border">
+                            <div className="space-y-0.5">
+                              <p className="font-bold text-foreground">同じ研究室/研究会の所属者は参加不可</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                内輪のメンバーではなく、クリーンな外部の被験者のみを募集します。
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setFilterSameLab((prev) => !prev)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
+                                filterSameLab
+                                  ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                  : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                              }`}
+                            >
+                              {filterSameLab ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 pt-1 border-t">
+                        <span className="text-[11px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-wider">
+                          <Users className="size-3.5" />
+                          <span>② 被験者属性・身体条件（マイページ自動照合）</span>
+                        </span>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="p-3 rounded-lg bg-background border space-y-1.5">
+                            <Label className="text-foreground font-bold flex items-center gap-1">
+                              <Hand className="size-3.5 text-muted-foreground" />
+                              <span>利き手の制限</span>
+                            </Label>
+                            <select
+                              value={requiredDominantHand}
+                              onChange={(e: any) => setRequiredDominantHand(e.target.value)}
+                              className="w-full h-8 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
+                            >
+                              <option value="any">指定なし（両方可）</option>
+                              <option value="right">右利き限定</option>
+                              <option value="left">左利き限定</option>
+                            </select>
+                          </div>
+
+                          <div className="p-3 rounded-lg bg-background border space-y-1.5">
+                            <Label className="text-foreground font-bold flex items-center gap-1">
+                              <Eye className="size-3.5 text-muted-foreground" />
+                              <span>視力・矯正の制限</span>
+                            </Label>
+                            <select
+                              value={requiredVision}
+                              onChange={(e: any) => setRequiredVision(e.target.value)}
+                              className="w-full h-8 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
+                            >
+                              <option value="any">指定なし（裸眼・矯正可）</option>
+                              <option value="naked">裸眼限定</option>
+                              <option value="corrected">矯正視力限定</option>
+                            </select>
+                          </div>
+
+                          <div className="p-3 rounded-lg bg-background border space-y-1.5">
+                            <Label className="text-foreground font-bold flex items-center gap-1">
+                              <Scale className="size-3.5 text-muted-foreground" />
+                              <span>性別の制限</span>
+                            </Label>
+                            <select
+                              value={requiredGender}
+                              onChange={(e: any) => setRequiredGender(e.target.value)}
+                              className="w-full h-8 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
+                            >
+                              <option value="any">指定なし（問わない）</option>
+                              <option value="male">男性限定</option>
+                              <option value="female">女性限定</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 pt-1 border-t">
+                        <span className="text-[11px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-wider">
+                          <Plus className="size-3.5" />
+                          <span>③ 独自の同意条件を追加（任意）</span>
+                        </span>
+
+                        {customQualifications.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-background border text-xs">
+                            <span className="font-medium text-foreground truncate">・{item}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCustomQualification(idx)}
+                              className="text-muted-foreground hover:text-destructive p-1 shrink-0"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        ))}
+
+                        <div className="flex items-center gap-2">
+                          <Input
+                            placeholder="例: 身長160cm以上の方 / カラーコンタクト着用不可"
+                            value={newCustomQualText}
+                            onChange={(e) => setNewCustomQualText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                handleAddCustomQualification()
+                              }
+                            }}
+                            className="text-xs h-9 bg-background"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleAddCustomQualification}
+                            disabled={!newCustomQualText.trim()}
+                            className="h-9 px-3 text-xs shrink-0 gap-1 font-semibold"
+                          >
+                            <Plus className="size-3.5" />
+                            <span>条件を追加</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* オンラインアンケート用：複数回回答設定 */}
+                {mode === 'online' && (
+                  <div className="p-4 rounded-xl border bg-card flex items-start justify-between gap-3 text-xs">
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-foreground flex items-center gap-1.5">
+                        <Layers className="size-3.5 text-primary" />
+                        <span>複数回の回答設定</span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground leading-snug">
+                        {allowMultipleSlots
+                          ? '1人の被験者が複数回アンケートに回答・提出できます（反復・定期調査向け）'
+                          : '1人の被験者は1回しか回答・提出できません（一般的な認知・心理・意識調査向け）'}
                       </p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setHasClosingDate((prev) => !prev)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
-                        hasClosingDate
+                      onClick={() => setAllowMultipleSlots((prev) => !prev)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all shrink-0 ${
+                        allowMultipleSlots
                           ? 'bg-primary text-primary-foreground border-primary shadow-xs'
                           : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
                       }`}
                     >
-                      {hasClosingDate ? '締切日: 設定中' : '期限なし (定員まで)'}
+                      {allowMultipleSlots ? '複数回答: 許可' : '1人1回限定'}
                     </button>
                   </div>
-
-                  {hasClosingDate && (
-                    <div className="pt-2 border-t border-border/60 max-w-sm animate-in fade-in">
-                      <Label className="text-[11px] text-muted-foreground font-medium block mb-1">
-                        受付を締め切る日付を選択
-                      </Label>
-                      <SegmentedDatePicker
-                        value={onlineClosingDate}
-                        onChange={(val) => setOnlineClosingDate(val)}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* 学内対面実験用 */
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
-                  <div className="space-y-1.5">
-                    <Label className="font-bold text-foreground flex items-center gap-1">
-                      <span>所要時間（分）</span>
-                      <span className="text-rose-500">*</span>
-                    </Label>
-                    <Input
-                      type="number"
-                      required
-                      min="5"
-                      value={durationMins}
-                      onChange={(e) => setDurationMins(e.target.value)}
-                      className="text-xs h-10 font-bold"
-                    />
-                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      {COMMON_DURATIONS.map((dur) => (
-                        <button
-                          key={dur}
-                          type="button"
-                          onClick={() => setDurationMins(dur)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
-                            durationMins === dur
-                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                              : 'bg-muted/40 hover:bg-muted text-muted-foreground border-border'
-                          }`}
-                        >
-                          {dur}分
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="font-bold text-foreground flex items-center gap-1">
-                      <span>謝礼種別</span>
-                      <span className="text-rose-500">*</span>
-                    </Label>
-                    <select
-                      value={rewardType}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setRewardType(val)
-                        if (val === '謝礼なし') {
-                          setRewardAmount('0')
-                        }
-                      }}
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring font-medium"
-                    >
-                      {REWARD_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="font-bold text-foreground flex items-center gap-1">
-                      <span>謝礼金額（円）</span>
-                      {!isAmountDisabled && <span className="text-rose-500">*</span>}
-                      {isAmountDisabled && <span className="text-[10px] text-muted-foreground font-normal">（不要）</span>}
-                    </Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      disabled={isAmountDisabled}
-                      value={isAmountDisabled ? '0' : rewardAmount}
-                      onChange={(e) => setRewardAmount(e.target.value)}
-                      className="text-xs h-10 disabled:opacity-40 disabled:bg-muted/40 font-bold"
-                    />
-                  </div>
-                </div>
-
-                {rewardType === 'その他' && (
-                  <div className="space-y-1.5 text-xs animate-in fade-in duration-200">
-                    <Label className="font-bold text-foreground flex items-center gap-1">
-                      <span>謝礼の詳細（その他）</span>
-                      <span className="text-rose-500">*</span>
-                    </Label>
-                    <Input
-                      required
-                      placeholder="例: 図書カード1,000円分 / 特製ノベルティ・記念品 / カフェチケット"
-                      value={customRewardType}
-                      onChange={(e) => setCustomRewardType(e.target.value)}
-                      className="text-xs h-10"
-                    />
-                  </div>
                 )}
-              </div>
-            )}
 
-            {/* 慶應認証バッジ限定設定スイッチ */}
-            <div className="p-4 rounded-xl border bg-primary/5 border-primary/20 flex items-start justify-between gap-3 text-xs">
-              <div className="space-y-0.5">
-                <p className="font-bold text-foreground flex items-center gap-1.5">
-                  <ShieldCheck className="size-4 text-primary" />
-                  <span>慶應認証バッジ保有者のみ参加可能</span>
-                </p>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  ONにすると、慶應メール（@keio.jp）で認証済みの学生のみが応募できるよう制限されます（推奨）。
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRequiresKeioBadge((prev) => !prev)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
-                  requiresKeioBadge
-                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                    : 'bg-muted/60 text-muted-foreground border-border hover:bg-muted'
-                }`}
-              >
-                {requiresKeioBadge ? '慶應限定: ON' : '全ユーザー許可'}
-              </button>
-            </div>
-
-            {/* 参加資格・倫理チェックボックス設定（アコーディオン式） */}
-            <div className="rounded-xl border bg-card overflow-hidden text-xs transition-all">
-              <button
-                type="button"
-                onClick={() => setIsQualificationsExpanded(!isQualificationsExpanded)}
-                className="w-full p-4 flex items-center justify-between hover:bg-muted/30 transition-colors text-left"
-              >
-                <div className="space-y-0.5">
-                  <p className="font-bold text-foreground flex items-center gap-2">
-                    <SlidersHorizontal className="size-4 text-primary" />
-                    <span>参加資格・倫理チェックボックス設定</span>
-                    {activeConditionCount > 0 ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/25">
-                        設定中: {activeConditionCount}件
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground font-normal">
-                        （未設定）
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    研究倫理、マイページ属性（視力・利き手・性別）、独自条件を指定できます。
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 text-primary font-semibold text-xs ml-2 shrink-0">
-                  <span>{isQualificationsExpanded ? '閉じる' : '開いて設定'}</span>
-                  {isQualificationsExpanded ? (
-                    <ChevronUp className="size-4" />
-                  ) : (
-                    <ChevronDown className="size-4" />
-                  )}
-                </div>
-              </button>
-
-              {isQualificationsExpanded && (
-                <div className="p-4 pt-1 border-t space-y-4 bg-muted/10 animate-in fade-in duration-200">
-                  {/* ① 研究倫理 */}
-                  <div className="space-y-2.5">
-                    <span className="text-[11px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-wider">
-                      <ShieldCheck className="size-3.5" />
-                      <span>① 研究倫理・バイアス防止</span>
-                    </span>
-
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-background border">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <p className="font-bold text-foreground">
-                              この研究に関する事前知識がある人の参加はご遠慮ください
-                            </p>
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                              推奨
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground">
-                            ゼミや進捗報告などで仮説や実験手順をすでに知っている人の参加を防ぎます。
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFilterPriorKnowledge((prev) => !prev)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
-                            filterPriorKnowledge
-                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                              : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                          }`}
-                        >
-                          {filterPriorKnowledge ? 'ON' : 'OFF'}
-                        </button>
-                      </div>
-
-                      <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-background border">
-                        <div className="space-y-0.5">
-                          <p className="font-bold text-foreground">同じ研究室/研究会の所属者は参加不可</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            内輪のメンバーではなく、クリーンな外部の被験者のみを募集します。
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFilterSameLab((prev) => !prev)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
-                            filterSameLab
-                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                              : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                          }`}
-                        >
-                          {filterSameLab ? 'ON' : 'OFF'}
-                        </button>
-                      </div>
+                {/* 総募集人数の設定エリア */}
+                <div className="p-4 rounded-xl border bg-muted/20 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="font-bold text-foreground flex items-center gap-1.5 text-sm">
+                        <Users className="size-4 text-primary" />
+                        <span>総募集人数（定員）*</span>
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        {mode === 'in-person'
+                          ? isTotalManuallyEdited
+                            ? '手動で編集された人数が適用されます'
+                            : slots.length === 0
+                            ? '下のスロット枠を追加すると自動計算されます'
+                            : 'スロット枠の定員合計から自動計算中'
+                          : 'オンライン回答を受け付ける上限人数'}
+                      </p>
                     </div>
-                  </div>
-
-                  {/* ② マイページ属性 */}
-                  <div className="space-y-2.5 pt-1 border-t">
-                    <span className="text-[11px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-wider">
-                      <Users className="size-3.5" />
-                      <span>② 被験者属性・身体条件（マイページ自動照合）</span>
-                    </span>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="p-3 rounded-lg bg-background border space-y-1.5">
-                        <Label className="text-foreground font-bold flex items-center gap-1">
-                          <Hand className="size-3.5 text-muted-foreground" />
-                          <span>利き手の制限</span>
-                        </Label>
-                        <select
-                          value={requiredDominantHand}
-                          onChange={(e: any) => setRequiredDominantHand(e.target.value)}
-                          className="w-full h-8 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
-                        >
-                          <option value="any">指定なし（両方可）</option>
-                          <option value="right">右利き限定</option>
-                          <option value="left">左利き限定</option>
-                        </select>
-                      </div>
-
-                      <div className="p-3 rounded-lg bg-background border space-y-1.5">
-                        <Label className="text-foreground font-bold flex items-center gap-1">
-                          <Eye className="size-3.5 text-muted-foreground" />
-                          <span>視力・矯正の制限</span>
-                        </Label>
-                        <select
-                          value={requiredVision}
-                          onChange={(e: any) => setRequiredVision(e.target.value)}
-                          className="w-full h-8 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
-                        >
-                          <option value="any">指定なし（裸眼・矯正可）</option>
-                          <option value="naked">裸眼限定</option>
-                          <option value="corrected">矯正視力限定</option>
-                        </select>
-                      </div>
-
-                      <div className="p-3 rounded-lg bg-background border space-y-1.5">
-                        <Label className="text-foreground font-bold flex items-center gap-1">
-                          <Scale className="size-3.5 text-muted-foreground" />
-                          <span>性別の制限</span>
-                        </Label>
-                        <select
-                          value={requiredGender}
-                          onChange={(e: any) => setRequiredGender(e.target.value)}
-                          className="w-full h-8 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
-                        >
-                          <option value="any">指定なし（問わない）</option>
-                          <option value="male">男性限定</option>
-                          <option value="female">女性限定</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ③ カスタム条件 */}
-                  <div className="space-y-2.5 pt-1 border-t">
-                    <span className="text-[11px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-wider">
-                      <Plus className="size-3.5" />
-                      <span>③ 独自の同意条件を追加（任意）</span>
-                    </span>
-
-                    {customQualifications.map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-background border text-xs">
-                        <span className="font-medium text-foreground truncate">・{item}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCustomQualification(idx)}
-                          className="text-muted-foreground hover:text-destructive p-1 shrink-0"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </div>
-                    ))}
 
                     <div className="flex items-center gap-2">
                       <Input
-                        placeholder="例: 身長160cm以上の方 / カラーコンタクト着用不可"
-                        value={newCustomQualText}
-                        onChange={(e) => setNewCustomQualText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
-                            handleAddCustomQualification()
-                          }
-                        }}
-                        className="text-xs h-9 bg-background"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAddCustomQualification}
-                        disabled={!newCustomQualText.trim()}
-                        className="h-9 px-3 text-xs shrink-0 gap-1 font-semibold"
-                      >
-                        <Plus className="size-3.5" />
-                        <span>条件を追加</span>
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* オンラインアンケート用：複数回回答設定 */}
-            {mode === 'online' && (
-              <div className="p-4 rounded-xl border bg-card flex items-start justify-between gap-3 text-xs">
-                <div className="space-y-0.5">
-                  <p className="font-bold text-foreground flex items-center gap-1.5">
-                    <Layers className="size-3.5 text-primary" />
-                    <span>複数回の回答設定</span>
-                  </p>
-                  <p className="text-[11px] text-muted-foreground leading-snug">
-                    {allowMultipleSlots
-                      ? '1人の被験者が複数回アンケートに回答・提出できます（反復・定期調査向け）'
-                      : '1人の被験者は1回しか回答・提出できません（一般的な認知・心理・意識調査向け）'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAllowMultipleSlots((prev) => !prev)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all shrink-0 ${
-                    allowMultipleSlots
-                      ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                      : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                  }`}
-                >
-                  {allowMultipleSlots ? '複数回答: 許可' : '1人1回限定'}
-                </button>
-              </div>
-            )}
-
-            {/* 総募集人数の設定エリア */}
-            <div className="p-4 rounded-xl border bg-muted/20 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label className="font-bold text-foreground flex items-center gap-1.5 text-sm">
-                    <Users className="size-4 text-primary" />
-                    <span>総募集人数（定員）*</span>
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    {mode === 'in-person'
-                      ? isTotalManuallyEdited
-                        ? '手動で編集された人数が適用されます'
-                        : slots.length === 0
-                        ? '下のスロット枠を追加すると自動計算されます'
-                        : 'スロット枠の定員合計から自動計算中'
-                      : 'オンライン回答を受け付ける上限人数'}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min="0"
-                    value={totalSpots}
-                    onChange={(e) => {
-                      setTotalSpots(parseInt(e.target.value) || 0)
-                      setIsTotalManuallyEdited(true)
-                    }}
-                    className="w-24 text-center text-sm font-bold bg-background h-10"
-                  />
-                  <span className="text-xs text-muted-foreground font-semibold">名</span>
-                </div>
-              </div>
-
-              {mode === 'in-person' && isTotalManuallyEdited && (
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={handleResetToSlotsTotal}
-                    className="text-[11px] text-primary hover:underline font-medium"
-                  >
-                    ↺ スロットの合計値にリセット
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* スロット設定（対面実験の場合） */}
-            {mode === 'in-person' && (
-              <div className="space-y-4 border-t pt-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-bold text-foreground flex items-center gap-1.5">
-                    <CalendarIcon className="size-4 text-primary" />
-                    <span>募集スロット枠設定</span>
-                  </Label>
-                  <span className="text-xs text-muted-foreground font-medium">
-                    計 {slots.length} 枠登録済み
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-xl border bg-card/60 flex items-start justify-between gap-3 text-xs">
-                  <div className="space-y-0.5">
-                    <p className="font-bold text-foreground flex items-center gap-1.5">
-                      <Layers className="size-3.5 text-primary" />
-                      <span>複数枠への参加設定</span>
-                    </p>
-                    <p className="text-[11px] text-muted-foreground leading-snug">
-                      {allowMultipleSlots
-                        ? '1人の被験者が複数の異なる時間スロットに応募できます（作業系・長期実験向け）'
-                        : '1人の被験者は1つのスロットにしか参加できません（一般的な心理・認知実験向け）'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAllowMultipleSlots((prev) => !prev)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all shrink-0 ${
-                      allowMultipleSlots
-                        ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                        : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                    }`}
-                  >
-                    {allowMultipleSlots ? '複数枠参加: 許可' : '1人1枠限定'}
-                  </button>
-                </div>
-
-                {/* 新規スロット作成ビルダー */}
-                <div className="p-4 rounded-xl border border-primary/25 bg-primary/5 space-y-4 text-xs">
-                  <p className="font-bold text-foreground flex items-center gap-1.5 text-xs">
-                    <Plus className="size-4 text-primary" />
-                    <span>新しい日時枠を追加</span>
-                  </p>
-
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
-                    <div className="space-y-1.5 md:col-span-5">
-                      <Label className="text-[11px] text-muted-foreground font-medium">
-                        日付選択 (年/月/日)
-                      </Label>
-                      <SegmentedDatePicker
-                        value={newSlotDate}
-                        onChange={(val) => setNewSlotDate(val)}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5 md:col-span-4">
-                      <Label className="text-[11px] text-muted-foreground font-medium">
-                        開始時刻 (所要時間: {durationMins}分)
-                      </Label>
-                      <AnalogTimePicker
-                        value={newSlotStartTime}
-                        onChange={(val) => setNewSlotStartTime(val)}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5 md:col-span-3">
-                      <Label className="text-[11px] text-muted-foreground font-medium">定員（名）</Label>
-                      <Input
                         type="number"
-                        min="1"
-                        value={newSlotCapacity}
-                        onChange={(e) => setNewSlotCapacity(parseInt(e.target.value) || 1)}
-                        className="text-xs bg-background font-bold h-10 text-center"
+                        min="0"
+                        value={totalSpots}
+                        onChange={(e) => {
+                          setTotalSpots(parseInt(e.target.value) || 0)
+                          setIsTotalManuallyEdited(true)
+                        }}
+                        className="w-24 text-center text-sm font-bold bg-background h-10"
                       />
+                      <span className="text-xs text-muted-foreground font-semibold">名</span>
                     </div>
                   </div>
 
-                  {generatedSlotTimeString && (
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-primary/15">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] text-muted-foreground block font-medium">
-                          追加される枠のプレビュー:
-                        </span>
-                        <span className="font-mono font-bold text-primary text-xs tracking-wide">
-                          {generatedSlotTimeString}（定員: {newSlotCapacity}名）
-                        </span>
-                      </div>
-
-                      <Button
+                  {mode === 'in-person' && isTotalManuallyEdited && (
+                    <div className="flex justify-end pt-1">
+                      <button
                         type="button"
-                        size="sm"
-                        onClick={handleAddNewSlot}
-                        disabled={isDuplicateDetected && !allowDuplicateSlot}
-                        className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground shrink-0 self-end sm:self-auto px-4"
+                        onClick={handleResetToSlotsTotal}
+                        className="text-[11px] text-primary hover:underline font-medium"
                       >
-                        <Plus className="size-3.5" />
-                        <span>この枠を追加</span>
-                      </Button>
-                    </div>
-                  )}
-
-                  {isDuplicateDetected && (
-                    <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 space-y-1.5 animate-in fade-in">
-                      <div className="flex items-center gap-1.5 font-bold">
-                        <AlertTriangle className="size-4 shrink-0" />
-                        <span>同じ日時の枠が既に存在します</span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        同一日時に複数の並行ブースを設ける場合のみ、下の確認にチェックを入れて追加してください。
-                      </p>
-                      <label className="flex items-center gap-2 pt-0.5 cursor-pointer text-xs text-foreground font-semibold">
-                        <input
-                          type="checkbox"
-                          checked={allowDuplicateSlot}
-                          onChange={(e) => setAllowDuplicateSlot(e.target.checked)}
-                          className="rounded border-input size-4"
-                        />
-                        <span>同じ日時の枠を追加することを承認する</span>
-                      </label>
+                        ↺ スロットの合計値にリセット
+                      </button>
                     </div>
                   )}
                 </div>
 
-                {/* 登録済みスロット一覧 */}
-                <div className="space-y-2 pt-1">
-                  <Label className="text-[11px] text-muted-foreground font-medium">
-                    登録済みスロット一覧
-                  </Label>
-
-                  {slots.length === 0 ? (
-                    <div className="p-5 rounded-xl border border-dashed bg-muted/10 text-center text-xs text-muted-foreground space-y-1">
-                      <p className="font-semibold text-foreground">登録されたスロット枠がありません</p>
-                      <p className="text-[11px]">上の「新しい日時枠を追加」から実験の日時と定員を設定してください。</p>
+                {/* スロット設定（対面実験・面談の場合） */}
+                {mode === 'in-person' && (
+                  <div className="space-y-4 border-t pt-4">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-bold text-foreground flex items-center gap-1.5">
+                        <CalendarIcon className="size-4 text-primary" />
+                        <span>募集スロット枠設定</span>
+                      </Label>
+                      <span className="text-xs text-muted-foreground font-medium">
+                        計 {slots.length} 枠登録済み
+                      </span>
                     </div>
-                  ) : (
-                    slots.map((s) => (
-                      <div key={s.id} className="flex items-center gap-2">
-                        <Input
-                          value={s.time}
-                          onChange={(e) => handleSlotChange(s.id, 'time', e.target.value)}
-                          placeholder="日時（例: 10/20 (火) 13:00-13:30）"
-                          className="text-xs flex-1 font-mono h-9"
-                        />
-                        <div className="flex items-center gap-1.5 shrink-0">
+
+                    <div className="p-3.5 rounded-xl border bg-card/60 flex items-start justify-between gap-3 text-xs">
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-foreground flex items-center gap-1.5">
+                          <Layers className="size-3.5 text-primary" />
+                          <span>複数枠への参加設定</span>
+                        </p>
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          {allowMultipleSlots
+                            ? '1人の被験者が複数の異なる時間スロットに応募できます（作業系・長期実験向け）'
+                            : '1人の被験者は1つのスロットにしか参加できません（一般的な心理・認知実験向け）'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAllowMultipleSlots((prev) => !prev)}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all shrink-0 ${
+                          allowMultipleSlots
+                            ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                            : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                        }`}
+                      >
+                        {allowMultipleSlots ? '複数枠参加: 許可' : '1人1枠限定'}
+                      </button>
+                    </div>
+
+                    {/* 新規スロット作成ビルダー */}
+                    <div className="p-4 rounded-xl border border-primary/25 bg-primary/5 space-y-4 text-xs">
+                      <p className="font-bold text-foreground flex items-center gap-1.5 text-xs">
+                        <Plus className="size-4 text-primary" />
+                        <span>新しい日時枠を追加</span>
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
+                        <div className="space-y-1.5 md:col-span-5">
+                          <Label className="text-[11px] text-muted-foreground font-medium">
+                            日付選択 (年/月/日)
+                          </Label>
+                          <SegmentedDatePicker
+                            value={newSlotDate}
+                            onChange={(val) => setNewSlotDate(val)}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-4">
+                          <Label className="text-[11px] text-muted-foreground font-medium">
+                            開始時刻 (所要時間: {durationMins}分)
+                          </Label>
+                          <AnalogTimePicker
+                            value={newSlotStartTime}
+                            onChange={(val) => setNewSlotStartTime(val)}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-3">
+                          <Label className="text-[11px] text-muted-foreground font-medium">定員（名）</Label>
                           <Input
                             type="number"
                             min="1"
-                            value={s.capacity}
-                            onChange={(e) =>
-                              handleSlotChange(s.id, 'capacity', parseInt(e.target.value) || 1)
-                            }
-                            className="w-16 text-xs text-center font-bold h-9"
-                            title="定員"
+                            value={newSlotCapacity}
+                            onChange={(e) => setNewSlotCapacity(parseInt(e.target.value) || 1)}
+                            className="text-xs bg-background font-bold h-10 text-center"
                           />
-                          <span className="text-xs text-muted-foreground">名</span>
                         </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveSlot(s.id)}
-                          className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive shrink-0"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
                       </div>
-                    ))
-                  )}
+
+                      {generatedSlotTimeString && (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-primary/15">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] text-muted-foreground block font-medium">
+                              追加される枠のプレビュー:
+                            </span>
+                            <span className="font-mono font-bold text-primary text-xs tracking-wide">
+                              {generatedSlotTimeString}（定員: {newSlotCapacity}名）
+                            </span>
+                          </div>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleAddNewSlot}
+                            disabled={isDuplicateDetected && !allowDuplicateSlot}
+                            className="h-8 text-xs font-bold gap-1 bg-primary text-primary-foreground shrink-0 self-end sm:self-auto px-4"
+                          >
+                            <Plus className="size-3.5" />
+                            <span>この枠を追加</span>
+                          </Button>
+                        </div>
+                      )}
+
+                      {isDuplicateDetected && (
+                        <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 space-y-1.5 animate-in fade-in">
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <AlertTriangle className="size-4 shrink-0" />
+                            <span>同じ日時の枠が既に存在します</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            同一日時に複数の並行ブースを設ける場合のみ、下の確認にチェックを入れて追加してください。
+                          </p>
+                          <label className="flex items-center gap-2 pt-0.5 cursor-pointer text-xs text-foreground font-semibold">
+                            <input
+                              type="checkbox"
+                              checked={allowDuplicateSlot}
+                              onChange={(e) => setAllowDuplicateSlot(e.target.checked)}
+                              className="rounded border-input size-4"
+                            />
+                            <span>同じ日時の枠を追加することを承認する</span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 登録済みスロット一覧 */}
+                    <div className="space-y-2 pt-1">
+                      <Label className="text-[11px] text-muted-foreground font-medium">
+                        登録済みスロット一覧
+                      </Label>
+
+                      {slots.length === 0 ? (
+                        <div className="p-5 rounded-xl border border-dashed bg-muted/10 text-center text-xs text-muted-foreground space-y-1">
+                          <p className="font-semibold text-foreground">登録されたスロット枠がありません</p>
+                          <p className="text-[11px]">上の「新しい日時枠を追加」から実験の日時と定員を設定してください。</p>
+                        </div>
+                      ) : (
+                        slots.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2">
+                            <Input
+                              value={s.time}
+                              onChange={(e) => handleSlotChange(s.id, 'time', e.target.value)}
+                              placeholder="日時（例: 10/20 (火) 13:00-13:30）"
+                              className="text-xs flex-1 font-mono h-9"
+                            />
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Input
+                                type="number"
+                                min="1"
+                                value={s.capacity}
+                                onChange={(e) =>
+                                  handleSlotChange(s.id, 'capacity', parseInt(e.target.value) || 1)
+                                }
+                                className="w-16 text-xs text-center font-bold h-9"
+                                title="定員"
+                              />
+                              <span className="text-xs text-muted-foreground">名</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveSlot(s.id)}
+                              className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {errorMsg && (
+                  <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+                    <AlertCircle className="size-4 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onOpenChange(false)}
+                    className="text-xs h-9 px-4"
+                  >
+                    キャンセル
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={loading || totalSpots <= 0}
+                    className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-32 h-9 px-4"
+                  >
+                    {loading && <Loader2 className="size-3.5 animate-spin" />}
+                    <span>
+                      {isEditing
+                        ? '更新を保存する'
+                        : isPrivate
+                        ? `限定公開で作成する（計${totalSpots}名）`
+                        : `募集を公開する（計${totalSpots}名）`}
+                    </span>
+                  </Button>
                 </div>
-              </div>
-            )}
-
-            {errorMsg && (
-              <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-2">
-                <AlertCircle className="size-4 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onOpenChange(false)}
-                className="text-xs h-9 px-4"
-              >
-                キャンセル
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={loading || totalSpots <= 0}
-                className="text-xs font-bold gap-1.5 bg-primary text-primary-foreground min-w-32 h-9 px-4"
-              >
-                {loading && <Loader2 className="size-3.5 animate-spin" />}
-                <span>{isEditing ? '更新を保存する' : `募集を公開する（計${totalSpots}名）`}</span>
-              </Button>
-            </div>
-          </form>
+              </form>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

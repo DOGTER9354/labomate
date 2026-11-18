@@ -2,7 +2,7 @@
 
 import { MyBookingsDialog, type BookingModalType } from '@/components/labomate/my-bookings-dialog'
 import { useLanguage } from '@/lib/language-context'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CalendarCheck,
   SearchX,
@@ -80,6 +80,7 @@ export function Dashboard() {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [userName, setUserName] = useState('周誠')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const initialDeepLinkHandled = useRef(false)
 
   // PWA（アプリダウンロード）状態管理
   const [isStandaloneApp, setIsStandaloneApp] = useState(true)
@@ -318,6 +319,8 @@ export function Dashboard() {
             allow_multiple_slots: Boolean(item.allow_multiple_slots),
             requires_keio_badge: Boolean(item.requires_keio_badge),
             requiresKeioBadge: Boolean(item.requires_keio_badge),
+            isPrivate: Boolean(item.is_private),
+            is_private: Boolean(item.is_private),
             requirements: Array.isArray(item.requirements)
               ? item.requirements
               : item.requirements
@@ -353,6 +356,23 @@ export function Dashboard() {
     }
   }, [authLoading, experiments, fetchUserBookings])
 
+  // ★ URLパラメータ (?exp=ID) から限定公開・個別共有案件を自動で開く
+  useEffect(() => {
+    if (initialDeepLinkHandled.current || experiments.length === 0) return
+    if (typeof window === 'undefined') return
+
+    const params = new URLSearchParams(window.location.search)
+    const expParam = params.get('exp')
+    if (expParam) {
+      const target = experiments.find((e) => String(e.id) === String(expParam))
+      if (target) {
+        initialDeepLinkHandled.current = true
+        setSelected(target)
+        setDialogOpen(true)
+      }
+    }
+  }, [experiments])
+
   const handleRefresh = async () => {
     setIsRefreshing(true)
     try {
@@ -364,23 +384,28 @@ export function Dashboard() {
     }
   }
 
+  // ★ 一覧に表示する公開案件のみ（isPrivate === true のクローズ案件は除外）
+  const publicExperiments = useMemo(() => {
+    return experiments.filter((exp) => !(exp as any).isPrivate && !(exp as any).is_private)
+  }, [experiments])
+
   const counts = useMemo(() => {
     let inPersonCount = 0
     let onlineCount = 0
-    experiments.forEach((exp) => {
+    publicExperiments.forEach((exp) => {
       if (exp.mode === 'online') onlineCount++
       else inPersonCount++
     })
     return {
-      all: experiments.length,
+      all: publicExperiments.length,
       inPerson: inPersonCount,
       online: onlineCount,
     }
-  }, [experiments])
+  }, [publicExperiments])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return experiments.filter((exp) => {
+    return publicExperiments.filter((exp) => {
       if (modeTab === 'in-person' && exp.mode === 'online') return false
       if (modeTab === 'online' && exp.mode !== 'online') return false
       if (!matchesFilter(exp, filter)) return false
@@ -397,13 +422,24 @@ export function Dashboard() {
         .toLowerCase()
         .includes(q)
     })
-  }, [query, filter, modeTab, experiments])
+  }, [query, filter, modeTab, publicExperiments])
 
   const filterLabel = FILTERS.find((f) => f.id === filter)?.label
 
   const openExperiment = (exp: Experiment) => {
     setSelected(exp)
     setDialogOpen(true)
+  }
+
+  const handleDialogOpenChange = (open: boolean) => {
+    setDialogOpen(open)
+    if (!open && typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      if (url.searchParams.has('exp')) {
+        url.searchParams.delete('exp')
+        window.history.replaceState({}, '', url.pathname + url.search)
+      }
+    }
   }
 
   const isApplicationOnline = useCallback(
@@ -777,7 +813,6 @@ export function Dashboard() {
               </p>
             </div>
 
-            {/* ★ ブラウザアクセス時のみ表示される「アプリをダウンロード」ボタン */}
             {!isStandaloneApp && (
               <Button
                 type="button"
@@ -793,7 +828,6 @@ export function Dashboard() {
             )}
           </div>
 
-          {/* ★ iOS / 手動インストール手順展開ガイド */}
           {!isStandaloneApp && showIosInstallGuide && (
             <div className="mt-2.5 p-3 rounded-xl bg-primary/5 border border-primary/25 text-xs space-y-2 animate-in fade-in">
               <div className="flex items-center justify-between">
@@ -914,7 +948,7 @@ export function Dashboard() {
       <ExperimentDialog
         experiment={selected}
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={handleDialogOpenChange}
         bookedSlotId={selected ? bookings[selected.id] : undefined}
         onConfirm={handleConfirmBooking}
       />

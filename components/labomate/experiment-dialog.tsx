@@ -38,6 +38,8 @@ import {
   Hand,
   ArrowRight,
   Scale,
+  Share2,
+  Check,
 } from 'lucide-react'
 import { Experiment } from '@/lib/experiments'
 import { supabase } from '@/lib/supabase'
@@ -61,7 +63,6 @@ function isSlotExpired(timeStr: string): boolean {
     const now = new Date()
     const currentYear = now.getFullYear()
 
-    // パターン1: "10/27 (火) 05:34-06:04"
     const matchSlash = timeStr.match(/(\d{1,2})\/(\d{1,2}).*?(\d{1,2}):(\d{2})/)
     if (matchSlash) {
       const month = parseInt(matchSlash[1], 10) - 1
@@ -70,7 +71,6 @@ function isSlotExpired(timeStr: string): boolean {
       const minutes = parseInt(matchSlash[4], 10)
 
       let slotDate = new Date(currentYear, month, day, hours, minutes)
-      // 年末年始跨ぎの補正
       if (now.getMonth() === 11 && month === 0) {
         slotDate.setFullYear(currentYear + 1)
       } else if (now.getMonth() === 0 && month === 11) {
@@ -79,7 +79,6 @@ function isSlotExpired(timeStr: string): boolean {
       return now.getTime() > slotDate.getTime()
     }
 
-    // パターン2: "2026-10-27 05:34"
     const matchIso = timeStr.match(/(\d{4})-(\d{1,2})-(\d{1,2}).*?(\d{1,2}):(\d{2})/)
     if (matchIso) {
       const year = parseInt(matchIso[1], 10)
@@ -110,6 +109,7 @@ export function ExperimentDialog({
   const [appliedSuccess, setAppliedSuccess] = useState(false)
   const [successMessage, setSuccessMessage] = useState('応募が完了しました！')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [copiedShareUrl, setCopiedShareUrl] = useState(false)
 
   const [userBookedSlots, setUserBookedSlots] = useState<{ id?: string; time?: string; status?: string }[]>([])
   const [existingOnlineApp, setExistingOnlineApp] = useState<any | null>(null)
@@ -244,12 +244,14 @@ export function ExperimentDialog({
       setHasSubmittedSurvey(false)
       setCheckedAgreements({})
       setIsConditionsExpanded(true)
+      setCopiedShareUrl(false)
     }
   }, [open])
 
   if (!experiment) return null
 
   const expAny = experiment as any
+  const isPrivate = Boolean(expAny.isPrivate || expAny.is_private)
   const isOnline = Boolean(
     expAny.survey_url ||
     expAny.surveyUrl ||
@@ -257,6 +259,33 @@ export function ExperimentDialog({
     expAny.location?.includes('オンライン') ||
     expAny.format?.includes('オンライン')
   )
+
+  const handleShareExperiment = async () => {
+    if (typeof window === 'undefined') return
+    const shareUrl = `${window.location.origin}/?exp=${experiment.id}`
+    const shareText = `【CoLabo 募集】${experiment.title}`
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareText,
+          text: shareText,
+          url: shareUrl,
+        })
+        return
+      } catch (e) {
+        // キャンセル時はクリップボードコピーへフォールバック
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopiedShareUrl(true)
+      setTimeout(() => setCopiedShareUrl(false), 2500)
+    } catch (e) {
+      console.error('Copy failed:', e)
+    }
+  }
 
   const surveyUrl = expAny.survey_url || expAny.surveyUrl
   const expiryHours = Number(expAny.expiry_hours || expAny.expiryHours || 24)
@@ -423,7 +452,6 @@ export function ExperimentDialog({
       return
     }
 
-    // 選択されたスロットが過去枠でないかの最終バリデーション
     if (!isOnline && selectedSlotId) {
       const selectedSlot = experiment.slots?.find((s) => String(s.id) === String(selectedSlotId))
       if (selectedSlot && isSlotExpired(selectedSlot.time)) {
@@ -626,32 +654,62 @@ export function ExperimentDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px]">
-              {isOnline ? (
-                <span className="flex items-center gap-1">
-                  <Globe2 className="size-3" /> オンライン調査
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <Building2 className="size-3" /> 対面実験
-                </span>
-              )}
-            </Badge>
-            {requiresKeioBadge && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20 flex items-center gap-1">
-                <ShieldCheck className="size-3" /> 慶應生限定
+          <div className="flex items-center justify-between gap-2 pr-6">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Badge variant="outline" className="text-[10px]">
+                {isOnline ? (
+                  <span className="flex items-center gap-1">
+                    <Globe2 className="size-3" /> オンライン
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <Building2 className="size-3" /> 対面
+                  </span>
+                )}
               </Badge>
-            )}
-            <span className="text-xs text-muted-foreground font-medium">
-              {expAny.labName || expAny.lab_name || expAny.organizer || '研究室'}
-            </span>
+              {isPrivate && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 flex items-center gap-1">
+                  <Lock className="size-2.5" /> 限定公開
+                </Badge>
+              )}
+              {requiresKeioBadge && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20 flex items-center gap-1">
+                  <ShieldCheck className="size-3" /> 慶應生限定
+                </Badge>
+              )}
+            </div>
+
+            {/* ★ 共有ボタン（URLコピー / OSシェア） */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleShareExperiment}
+              className="h-7 px-2.5 text-[11px] font-bold gap-1 shrink-0"
+              title="この募集のリンクを共有"
+            >
+              {copiedShareUrl ? (
+                <>
+                  <Check className="size-3 text-emerald-500" />
+                  <span className="text-emerald-600 dark:text-emerald-400">コピー済み</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="size-3" />
+                  <span>共有</span>
+                </>
+              )}
+            </Button>
           </div>
+
+          <p className="text-xs text-muted-foreground font-medium">
+            {expAny.labName || expAny.lab_name || expAny.organizer || '研究室'}
+          </p>
 
           <DialogTitle className="text-base sm:text-lg font-bold text-foreground leading-snug">
             {experiment.title}
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
+          <DialogDescription className="text-xs text-muted-foreground whitespace-pre-wrap">
             {experiment.description || '参加条件・注意事項を確認の上、手順に沿って応募・回答してください。'}
           </DialogDescription>
         </DialogHeader>
@@ -665,7 +723,6 @@ export function ExperimentDialog({
           </div>
         ) : (
           <div className="space-y-4 pt-2">
-            {/* 赤い行で理由を表示する不一致アラートボックス */}
             {isProfileMismatched && (
               <div className="p-3.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-400 space-y-2 animate-in fade-in">
                 <div className="flex items-start gap-2">
@@ -771,7 +828,7 @@ export function ExperimentDialog({
               </div>
             )}
 
-            {/* 参加資格・倫理確認事項（アコーディオン式） */}
+            {/* 参加資格・倫理確認事項 */}
             {totalConditionsCount > 0 && (
               <div className="rounded-xl border bg-card overflow-hidden text-xs">
                 <button
@@ -817,7 +874,6 @@ export function ExperimentDialog({
 
                 {isConditionsExpanded && (
                   <div className="p-4 pt-2 border-t bg-muted/10 space-y-3.5 animate-in fade-in duration-200">
-                    {/* ① 研究倫理チェック */}
                     {ethicsConditions.length > 0 && (
                       <div className="space-y-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
@@ -845,14 +901,12 @@ export function ExperimentDialog({
                       </div>
                     )}
 
-                    {/* ② マイページ登録属性との照合 */}
                     {(reqHand !== 'any' || reqVision !== 'any' || reqGender !== 'any') && (
                       <div className="space-y-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
                           被験者属性の適合確認
                         </span>
 
-                        {/* 利き手 */}
                         {reqHand !== 'any' && (
                           hasRegisteredHand ? (
                             <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
@@ -894,7 +948,6 @@ export function ExperimentDialog({
                           )
                         )}
 
-                        {/* 視力 */}
                         {reqVision !== 'any' && (
                           hasRegisteredVision ? (
                             <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
@@ -938,7 +991,6 @@ export function ExperimentDialog({
                           )
                         )}
 
-                        {/* 性別 */}
                         {reqGender !== 'any' && (
                           hasRegisteredGender ? (
                             <div className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
@@ -982,7 +1034,6 @@ export function ExperimentDialog({
                       </div>
                     )}
 
-                    {/* ③ 独自カスタム条件チェック */}
                     {customList.length > 0 && (
                       <div className="space-y-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
@@ -1125,15 +1176,12 @@ export function ExperimentDialog({
                     )}
                   </div>
 
-                  {/* ★ スロット一覧（過去枠の自動無効化対応） */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     {experiment.slots.map((slot: any) => {
                       const booked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
                       const capacity = Number(slot.capacity ?? slot.maxParticipants ?? 1)
                       const isFull = booked >= capacity
                       const remainingInSlot = Math.max(0, capacity - booked)
-
-                      // 過去枠（開始時刻を過ぎているか）判定
                       const isPast = isSlotExpired(slot.time)
 
                       const isAlreadyBookedByMe = userBookedSlots.some((b) => {
