@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Clock, Check, RotateCcw, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Clock, Check, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface AnalogTimePickerProps {
@@ -21,6 +22,7 @@ export function AnalogTimePicker({ value, onChange }: AnalogTimePickerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [mode, setMode] = useState<'hour' | 'minute'>('hour')
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM')
+  const [mounted, setMounted] = useState(false)
 
   const [hour, setHour] = useState(13)
   const [minute, setMinute] = useState(0)
@@ -28,6 +30,10 @@ export function AnalogTimePicker({ value, onChange }: AnalogTimePickerProps) {
   // 手動入力用
   const [editingPart, setEditingPart] = useState<'hour' | 'minute' | null>(null)
   const [inputValue, setInputValue] = useState('')
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     if (!value) {
@@ -155,228 +161,234 @@ export function AnalogTimePicker({ value, onChange }: AnalogTimePickerProps) {
         </div>
       </button>
 
-      {/* ★ 画面中央に大きく表示される時計モーダル（枠切れ解消） */}
-      {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+      {/* ★ document.body 直下にポータル描画することで、スクロール位置に関係なく画面中央に表示 */}
+      {mounted &&
+        isOpen &&
+        createPortal(
           <div
-            className="fixed inset-0 -z-10"
-            onClick={() => setIsOpen(false)}
-          />
-          <div className="relative w-full max-w-sm rounded-3xl border bg-card p-5 shadow-2xl space-y-4 text-xs animate-in zoom-in-95 duration-150">
-            {/* 上部ヘッダー */}
-            <div className="flex items-center justify-between border-b pb-3">
-              <div className="flex items-baseline gap-1 text-3xl font-mono font-bold text-foreground">
-                {editingPart === 'hour' ? (
-                  <input
-                    type="number"
-                    min="0"
-                    max="23"
-                    autoFocus
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onBlur={handleInlineSubmit}
-                    onKeyDown={(e) => e.key === 'Enter' && handleInlineSubmit()}
-                    className="w-14 h-9 text-center text-2xl font-mono font-bold bg-muted/40 border border-primary rounded-lg text-foreground focus:outline-hidden"
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('hour')
-                      setEditingPart(null)
-                    }}
-                    onDoubleClick={() => {
-                      setEditingPart('hour')
-                      setInputValue(String(hour))
-                    }}
-                    className={`px-2 py-0.5 rounded-lg transition-colors ${
-                      mode === 'hour'
-                        ? 'text-primary bg-primary/10'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    title="時を選択（ダブルクリックで手入力）"
-                  >
-                    {display24Hour}
-                  </button>
-                )}
-
-                <span>:</span>
-
-                {editingPart === 'minute' ? (
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    autoFocus
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onBlur={handleInlineSubmit}
-                    onKeyDown={(e) => e.key === 'Enter' && handleInlineSubmit()}
-                    className="w-14 h-9 text-center text-2xl font-mono font-bold bg-muted/40 border border-primary rounded-lg text-foreground focus:outline-hidden"
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('minute')
-                      setEditingPart(null)
-                    }}
-                    onDoubleClick={() => {
-                      setEditingPart('minute')
-                      setInputValue(String(minute))
-                    }}
-                    className={`px-2 py-0.5 rounded-lg transition-colors ${
-                      mode === 'minute'
-                        ? 'text-primary bg-primary/10'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    title="分を選択（ダブルクリックで手入力）"
-                  >
-                    {displayMinute}
-                  </button>
-                )}
-              </div>
-
-              {/* 午前 / 午後 トグル */}
-              <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl text-xs font-bold">
-                <button
-                  type="button"
-                  onClick={() => handlePeriodChange('AM')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
-                    period === 'AM'
-                      ? 'bg-background shadow-sm text-foreground font-black'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  午前
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handlePeriodChange('PM')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
-                    period === 'PM'
-                      ? 'bg-background shadow-sm text-foreground font-black'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  午後
-                </button>
-              </div>
-            </div>
-
-            {/* アナログ時計盤 */}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <div
-              ref={clockRef}
-              onPointerDown={handlePointerEvent}
-              onPointerMove={(e) => {
-                if (e.buttons === 1) handlePointerEvent(e)
-              }}
-              onPointerUp={() => {
-                if (mode === 'hour') setMode('minute')
-              }}
-              className="relative size-56 mx-auto rounded-full bg-muted/30 border border-border/80 flex items-center justify-center cursor-pointer select-none touch-none shadow-inner"
-            >
-              <div className="size-2.5 rounded-full bg-primary z-10 shadow-xs" />
+              className="fixed inset-0 -z-10"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="relative w-full max-w-sm rounded-3xl border bg-card p-5 shadow-2xl space-y-4 text-xs animate-in zoom-in-95 duration-150">
+              {/* 上部ヘッダー */}
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-baseline gap-1 text-3xl font-mono font-bold text-foreground">
+                  {editingPart === 'hour' ? (
+                    <input
+                      type="number"
+                      min="0"
+                      max="23"
+                      autoFocus
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onBlur={handleInlineSubmit}
+                      onKeyDown={(e) => e.key === 'Enter' && handleInlineSubmit()}
+                      className="w-14 h-9 text-center text-2xl font-mono font-bold bg-muted/40 border border-primary rounded-lg text-foreground focus:outline-hidden"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('hour')
+                        setEditingPart(null)
+                      }}
+                      onDoubleClick={() => {
+                        setEditingPart('hour')
+                        setInputValue(String(hour))
+                      }}
+                      className={`px-2 py-0.5 rounded-lg transition-colors ${
+                        mode === 'hour'
+                          ? 'text-primary bg-primary/10'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title="時を選択（ダブルクリックで手入力）"
+                    >
+                      {display24Hour}
+                    </button>
+                  )}
 
-              {/* 針 */}
-              <div
-                className="absolute bottom-1/2 left-1/2 w-0.5 bg-primary origin-bottom transition-transform duration-75 pointer-events-none"
-                style={{
-                  height: '40%',
-                  transform: `translateX(-50%) rotate(${handAngle}deg)`,
-                }}
-              >
-                <div className="size-7 rounded-full bg-primary/20 border-2 border-primary -translate-x-1/2 -translate-y-1/2 absolute top-0 left-1/2 shadow-xs" />
+                  <span>:</span>
+
+                  {editingPart === 'minute' ? (
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      autoFocus
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onBlur={handleInlineSubmit}
+                      onKeyDown={(e) => e.key === 'Enter' && handleInlineSubmit()}
+                      className="w-14 h-9 text-center text-2xl font-mono font-bold bg-muted/40 border border-primary rounded-lg text-foreground focus:outline-hidden"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('minute')
+                        setEditingPart(null)
+                      }}
+                      onDoubleClick={() => {
+                        setEditingPart('minute')
+                        setInputValue(String(minute))
+                      }}
+                      className={`px-2 py-0.5 rounded-lg transition-colors ${
+                        mode === 'minute'
+                          ? 'text-primary bg-primary/10'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title="分を選択（ダブルクリックで手入力）"
+                    >
+                      {displayMinute}
+                    </button>
+                  )}
+                </div>
+
+                {/* 午前 / 午後 トグル */}
+                <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => handlePeriodChange('AM')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      period === 'AM'
+                        ? 'bg-background shadow-sm text-foreground font-black'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    午前
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePeriodChange('PM')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      period === 'PM'
+                        ? 'bg-background shadow-sm text-foreground font-black'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    午後
+                  </button>
+                </div>
               </div>
 
-              {/* 文字盤数字 */}
-              {mode === 'hour'
-                ? hourNumbers.map((n, i) => {
-                    const angle = (i * 30 * Math.PI) / 180
-                    const r = 82
-                    const x = Math.sin(angle) * r
-                    const y = -Math.cos(angle) * r
-                    const isSelected = hour === n
+              {/* アナログ時計盤 */}
+              <div
+                ref={clockRef}
+                onPointerDown={handlePointerEvent}
+                onPointerMove={(e) => {
+                  if (e.buttons === 1) handlePointerEvent(e)
+                }}
+                onPointerUp={() => {
+                  if (mode === 'hour') setMode('minute')
+                }}
+                className="relative size-56 mx-auto rounded-full bg-muted/30 border border-border/80 flex items-center justify-center cursor-pointer select-none touch-none shadow-inner"
+              >
+                <div className="size-2.5 rounded-full bg-primary z-10 shadow-xs" />
 
-                    return (
-                      <span
-                        key={n}
-                        className={`absolute text-sm font-mono font-bold flex items-center justify-center size-7 rounded-full pointer-events-none ${
-                          isSelected
-                            ? 'text-primary font-black scale-125'
-                            : 'text-muted-foreground'
-                        }`}
-                        style={{
-                          transform: `translate(${x}px, ${y}px)`,
-                        }}
-                      >
-                        {n}
-                      </span>
-                    )
-                  })
-                : [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m, i) => {
-                    const angle = (i * 30 * Math.PI) / 180
-                    const r = 82
-                    const x = Math.sin(angle) * r
-                    const y = -Math.cos(angle) * r
-                    const isSelected = minute === m
+                {/* 針 */}
+                <div
+                  className="absolute bottom-1/2 left-1/2 w-0.5 bg-primary origin-bottom transition-transform duration-75 pointer-events-none"
+                  style={{
+                    height: '40%',
+                    transform: `translateX(-50%) rotate(${handAngle}deg)`,
+                  }}
+                >
+                  <div className="size-7 rounded-full bg-primary/20 border-2 border-primary -translate-x-1/2 -translate-y-1/2 absolute top-0 left-1/2 shadow-xs" />
+                </div>
 
-                    return (
-                      <span
-                        key={m}
-                        className={`absolute text-xs font-mono font-bold flex items-center justify-center size-7 rounded-full pointer-events-none ${
-                          isSelected
-                            ? 'text-primary font-black scale-125'
-                            : 'text-muted-foreground'
-                        }`}
-                        style={{
-                          transform: `translate(${x}px, ${y}px)`,
-                        }}
-                      >
-                        {String(m).padStart(2, '0')}
-                      </span>
-                    )
-                  })}
-            </div>
-
-            {/* ガイドテキスト */}
-            <div className="text-[11px] text-center text-muted-foreground space-y-0.5">
-              <p>
+                {/* 文字盤数字 */}
                 {mode === 'hour'
-                  ? `時計盤を回して${period === 'PM' ? '午後（12〜23時）' : '午前（0〜11時）'}を指定`
-                  : '時計盤で分を指定（5分刻み）'}
-              </p>
-              <p className="text-[10px] text-primary font-medium">
-                ＊上の数字をダブルクリックでキーボードから直接手入力も可能
-              </p>
-            </div>
+                  ? hourNumbers.map((n, i) => {
+                      const angle = (i * 30 * Math.PI) / 180
+                      const r = 82
+                      const x = Math.sin(angle) * r
+                      const y = -Math.cos(angle) * r
+                      const isSelected = hour === n
 
-            {/* フッター */}
-            <div className="flex items-center justify-between pt-2 border-t text-xs">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleResetToCurrent}
-                className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5"
-              >
-                <RotateCcw className="size-3.5" />
-                <span>リセット</span>
-              </Button>
+                      return (
+                        <span
+                          key={n}
+                          className={`absolute text-sm font-mono font-bold flex items-center justify-center size-7 rounded-full pointer-events-none ${
+                            isSelected
+                              ? 'text-primary font-black scale-125'
+                              : 'text-muted-foreground'
+                          }`}
+                          style={{
+                            transform: `translate(${x}px, ${y}px)`,
+                          }}
+                        >
+                          {n}
+                        </span>
+                      )
+                    })
+                  : [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m, i) => {
+                      const angle = (i * 30 * Math.PI) / 180
+                      const r = 82
+                      const x = Math.sin(angle) * r
+                      const y = -Math.cos(angle) * r
+                      const isSelected = minute === m
 
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => setIsOpen(false)}
-                className="h-8 px-4 text-xs font-bold gap-1.5 bg-primary text-primary-foreground shadow-sm"
-              >
-                <Check className="size-4" />
-                <span>完成</span>
-              </Button>
+                      return (
+                        <span
+                          key={m}
+                          className={`absolute text-xs font-mono font-bold flex items-center justify-center size-7 rounded-full pointer-events-none ${
+                            isSelected
+                              ? 'text-primary font-black scale-125'
+                              : 'text-muted-foreground'
+                          }`}
+                          style={{
+                            transform: `translate(${x}px, ${y}px)`,
+                          }}
+                        >
+                          {String(m).padStart(2, '0')}
+                        </span>
+                      )
+                    })}
+              </div>
+
+              {/* ガイドテキスト */}
+              <div className="text-[11px] text-center text-muted-foreground space-y-0.5">
+                <p>
+                  {mode === 'hour'
+                    ? `時計盤を回して${period === 'PM' ? '午後（12〜23時）' : '午前（0〜11時）'}を指定`
+                    : '時計盤で分を指定（5分刻み）'}
+                </p>
+                <p className="text-[10px] text-primary font-medium">
+                  ＊上の数字をダブルクリックでキーボードから直接手入力も可能
+                </p>
+              </div>
+
+              {/* フッター */}
+              <div className="flex items-center justify-between pt-2 border-t text-xs">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetToCurrent}
+                  className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+                >
+                  <RotateCcw className="size-3.5" />
+                  <span>リセット</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setIsOpen(false)}
+                  className="h-8 px-4 text-xs font-bold gap-1.5 bg-primary text-primary-foreground shadow-sm"
+                >
+                  <Check className="size-4" />
+                  <span>完成</span>
+                </Button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

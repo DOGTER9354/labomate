@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar as CalendarIcon, ChevronDown, Check, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { createPortal } from 'react-dom'
+import { Calendar as CalendarIcon, ChevronDown, X } from 'lucide-react'
 
 interface SegmentedDatePickerProps {
   value: string // "YYYY-MM-DD"
@@ -24,6 +24,11 @@ export function SegmentedDatePicker({ value, onChange }: SegmentedDatePickerProp
   const [popMode, setPopMode] = useState<'year' | 'month' | 'day' | null>(null)
   const [editingPart, setEditingPart] = useState<'year' | 'month' | 'day' | null>(null)
   const [inputValue, setInputValue] = useState('')
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     if (!value) {
@@ -49,7 +54,6 @@ export function SegmentedDatePicker({ value, onChange }: SegmentedDatePickerProp
   const daysInMonth = new Date(year, month, 0).getDate()
   const weekday = WEEKDAY_NAMES[new Date(year, month - 1, day).getDay()] || '日'
 
-  // 年の変更（もし今年を選んで過去月になっていた場合は今月に補正）
   const handleSelectYear = (selectedYear: number) => {
     if (selectedYear < currentYear) return
     let nextMonth = month
@@ -70,7 +74,6 @@ export function SegmentedDatePicker({ value, onChange }: SegmentedDatePickerProp
     notifyChange(selectedYear, nextMonth, nextDay)
   }
 
-  // 月の変更（過去月は選択不可、日も過去日なら今日に補正）
   const handleSelectMonth = (selectedMonth: number) => {
     if (year === currentYear && selectedMonth < currentMonth) return
     let nextDay = day
@@ -88,7 +91,6 @@ export function SegmentedDatePicker({ value, onChange }: SegmentedDatePickerProp
     notifyChange(year, selectedMonth, nextDay)
   }
 
-  // 日の変更（過去日は選択不可）
   const handleSelectDay = (selectedDay: number) => {
     if (year === currentYear && month === currentMonth && selectedDay < currentDay) return
     setDay(selectedDay)
@@ -96,7 +98,6 @@ export function SegmentedDatePicker({ value, onChange }: SegmentedDatePickerProp
     notifyChange(year, month, selectedDay)
   }
 
-  // 手入力（ダブルクリック時）の過去日バリデーション
   const handleInlineInputSubmit = () => {
     const num = parseInt(inputValue, 10)
     if (editingPart === 'year') {
@@ -222,138 +223,144 @@ export function SegmentedDatePicker({ value, onChange }: SegmentedDatePickerProp
         </div>
       </div>
 
-      {/* サブモーダル */}
-      {popMode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="fixed inset-0 -z-10" onClick={() => setPopMode(null)} />
-          <div className="relative w-full max-w-xs rounded-3xl border bg-card p-5 shadow-2xl text-xs space-y-3 animate-in zoom-in-95 duration-150">
-            {/* 年セレクター */}
-            {popMode === 'year' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <span className="font-bold text-sm text-foreground">年を選択</span>
-                  <button
-                    type="button"
-                    onClick={() => setPopMode(null)}
-                    className="p-1 rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  {[2025, 2026, 2027, 2028, 2029, 2030].map((y) => {
-                    const isPast = y < currentYear
-                    const isSelected = year === y
+      {/* ★ document.body 直下にポータル描画することで、スクロール位置に関係なく画面中央に表示 */}
+      {mounted &&
+        popMode &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="fixed inset-0 -z-10" onClick={() => setPopMode(null)} />
+            <div className="relative w-full max-w-xs rounded-3xl border bg-card p-5 shadow-2xl text-xs space-y-3 animate-in zoom-in-95 duration-150">
+              {/* 年セレクター */}
+              {popMode === 'year' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <span className="font-bold text-sm text-foreground">年を選択</span>
+                    <button
+                      type="button"
+                      onClick={() => setPopMode(null)}
+                      className="p-1 rounded-full text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {[2025, 2026, 2027, 2028, 2029, 2030].map((y) => {
+                      const isPast = y < currentYear
+                      const isSelected = year === y
 
-                    return (
-                      <button
-                        key={y}
-                        type="button"
-                        disabled={isPast}
-                        onClick={() => handleSelectYear(y)}
-                        className={`py-3 rounded-xl font-mono text-sm font-bold border transition-all ${
-                          isPast
-                            ? 'opacity-25 bg-muted/10 border-transparent text-muted-foreground cursor-not-allowed'
-                            : isSelected
-                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                            : 'hover:bg-muted text-foreground border-border/60'
-                        }`}
-                      >
-                        {y}年
-                      </button>
-                    )
-                  })}
+                      return (
+                        <button
+                          key={y}
+                          type="button"
+                          disabled={isPast}
+                          onClick={() => handleSelectYear(y)}
+                          className={`py-3 rounded-xl font-mono text-sm font-bold border transition-all ${
+                            isPast
+                              ? 'opacity-25 bg-muted/10 border-transparent text-muted-foreground cursor-not-allowed'
+                              : isSelected
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                              : 'hover:bg-muted text-foreground border-border/60'
+                          }`}
+                        >
+                          {y}年
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* 月セレクター */}
-            {popMode === 'month' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <span className="font-bold text-sm text-foreground">{year}年の月を選択</span>
-                  <button
-                    type="button"
-                    onClick={() => setPopMode(null)}
-                    className="p-1 rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-                    const isPast = year === currentYear && m < currentMonth
-                    const isSelected = month === m
+              {/* 月セレクター */}
+              {popMode === 'month' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <span className="font-bold text-sm text-foreground">{year}年の月を選択</span>
+                    <button
+                      type="button"
+                      onClick={() => setPopMode(null)}
+                      className="p-1 rounded-full text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+                      const isPast = year === currentYear && m < currentMonth
+                      const isSelected = month === m
 
-                    return (
-                      <button
-                        key={m}
-                        type="button"
-                        disabled={isPast}
-                        onClick={() => handleSelectMonth(m)}
-                        className={`py-3 rounded-xl font-mono text-xs font-bold border transition-all ${
-                          isPast
-                            ? 'opacity-25 bg-muted/10 border-transparent text-muted-foreground cursor-not-allowed'
-                            : isSelected
-                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                            : 'hover:bg-muted text-foreground border-border/60'
-                        }`}
-                      >
-                        {m}月
-                      </button>
-                    )
-                  })}
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          disabled={isPast}
+                          onClick={() => handleSelectMonth(m)}
+                          className={`py-3 rounded-xl font-mono text-xs font-bold border transition-all ${
+                            isPast
+                              ? 'opacity-25 bg-muted/10 border-transparent text-muted-foreground cursor-not-allowed'
+                              : isSelected
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                              : 'hover:bg-muted text-foreground border-border/60'
+                          }`}
+                        >
+                          {m}月
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* 日セレクター（カレンダーグリッド） */}
-            {popMode === 'day' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <span className="font-bold text-sm text-foreground">
-                    {year}年 {month}月
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPopMode(null)}
-                    className="p-1 rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-7 gap-1 pt-1 text-center font-mono">
-                  {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
-                    const isPast =
-                      year === currentYear &&
-                      month === currentMonth &&
-                      d < currentDay
-                    const isSelected = day === d
+              {/* 日セレクター（カレンダーグリッド） */}
+              {popMode === 'day' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <span className="font-bold text-sm text-foreground">
+                      {year}年 {month}月
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPopMode(null)}
+                      className="p-1 rounded-full text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 pt-1 text-center font-mono">
+                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+                      const isPast =
+                        year === currentYear &&
+                        month === currentMonth &&
+                        d < currentDay
+                      const isSelected = day === d
 
-                    return (
-                      <button
-                        key={d}
-                        type="button"
-                        disabled={isPast}
-                        onClick={() => handleSelectDay(d)}
-                        className={`h-9 rounded-lg font-bold border text-xs flex items-center justify-center transition-all ${
-                          isPast
-                            ? 'opacity-20 border-transparent text-muted-foreground cursor-not-allowed pointer-events-none'
-                            : isSelected
-                            ? 'bg-primary text-primary-foreground border-primary shadow-sm scale-105'
-                            : 'hover:bg-muted text-foreground border-border/40'
-                        }`}
-                      >
-                        {d}
-                      </button>
-                    )
-                  })}
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          disabled={isPast}
+                          onClick={() => handleSelectDay(d)}
+                          className={`h-9 rounded-lg font-bold border text-xs flex items-center justify-center transition-all ${
+                            isPast
+                              ? 'opacity-20 border-transparent text-muted-foreground cursor-not-allowed pointer-events-none'
+                              : isSelected
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm scale-105'
+                              : 'hover:bg-muted text-foreground border-border/40'
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
