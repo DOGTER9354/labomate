@@ -86,7 +86,6 @@ export function CreateExperimentDialog({
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // 作成完了後の共有リンク表示用ステート
   const [createdShareUrl, setCreatedShareUrl] = useState<string | null>(null)
   const [createdIsPrivate, setCreatedIsPrivate] = useState<boolean>(false)
   const [copiedLink, setCopiedLink] = useState(false)
@@ -104,30 +103,24 @@ export function CreateExperimentDialog({
   const [surveyUrl, setSurveyUrl] = useState('')
   const [expiryHours, setExpiryHours] = useState('24')
 
-  // オンライン回答の全体締切日（YYYY-MM-DD）
   const [onlineClosingDate, setOnlineClosingDate] = useState<string>('')
   const [hasClosingDate, setHasClosingDate] = useState<boolean>(false)
 
   const [allowMultipleSlots, setAllowMultipleSlots] = useState<boolean>(false)
   const [requiresKeioBadge, setRequiresKeioBadge] = useState<boolean>(true)
 
-  // 条件アコーディオン開閉
   const [isQualificationsExpanded, setIsQualificationsExpanded] = useState(false)
 
-  // ① 研究倫理フィルター
   const [filterPriorKnowledge, setFilterPriorKnowledge] = useState<boolean>(false)
   const [filterSameLab, setFilterSameLab] = useState<boolean>(false)
 
-  // ② 属性連動フィルター
   const [requiredDominantHand, setRequiredDominantHand] = useState<'any' | 'right' | 'left'>('any')
   const [requiredVision, setRequiredVision] = useState<'any' | 'naked' | 'corrected'>('any')
   const [requiredGender, setRequiredGender] = useState<'any' | 'male' | 'female'>('any')
 
-  // ③ 自由追加カスタム条件
   const [customQualifications, setCustomQualifications] = useState<string[]>([])
   const [newCustomQualText, setNewCustomQualText] = useState('')
 
-  // 推奨未設定確認ダイアログ
   const [confirmWarningOpen, setConfirmWarningOpen] = useState(false)
 
   const [slots, setSlots] = useState<{ id: string; time: string; capacity: number }[]>([])
@@ -226,7 +219,11 @@ export function CreateExperimentDialog({
       setRewardAmount(String(initialData.reward_amount ?? '0'))
       setDescription(initialData.description || '')
       setSurveyUrl(initialData.survey_url || '')
-      setExpiryHours(String(initialData.expiry_hours ?? 24))
+      setExpiryHours(
+        initialData.expiry_hours !== null && initialData.expiry_hours !== undefined
+          ? String(initialData.expiry_hours)
+          : '24'
+      )
 
       const cDate = initialData.closing_date || initialData.deadline || ''
       setOnlineClosingDate(cDate)
@@ -487,6 +484,7 @@ export function CreateExperimentDialog({
       customQualifications.forEach((q) => generatedRequirements.push(q))
 
       const finalClosingDate = mode === 'online' && hasClosingDate && onlineClosingDate ? onlineClosingDate : null
+      const parsedExpiryHours = parseInt(expiryHours, 10)
 
       const experimentPayload: any = {
         title: title.trim(),
@@ -498,7 +496,8 @@ export function CreateExperimentDialog({
         reward_type: finalRewardType,
         description: description.trim(),
         survey_url: mode === 'online' ? surveyUrl.trim() : null,
-        expiry_hours: mode === 'online' ? parseInt(expiryHours) || 24 : null,
+        // ★ 0（無制限）を 24 に上書きしないよう NaN チェックで判定
+        expiry_hours: mode === 'online' ? (Number.isNaN(parsedExpiryHours) ? 24 : parsedExpiryHours) : null,
         closing_date: finalClosingDate,
         deadline: finalClosingDate,
         spots_total: totalSpots,
@@ -922,7 +921,6 @@ export function CreateExperimentDialog({
                     </div>
                   </div>
                 ) : (
-                  /* 学内対面実験用 */
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
                       <div className="space-y-1.5">

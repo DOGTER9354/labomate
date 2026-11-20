@@ -167,11 +167,14 @@ export function Dashboard() {
 
           if (isOnline && !isDone && app.status === '確定') {
             const matchedExp = experiments.find((e) => String(e.id) === expId) as any
-            const expiryHours = Number(matchedExp?.expiry_hours || matchedExp?.expiryHours || 24)
+            const rawExpiry = matchedExp?.expiry_hours ?? matchedExp?.expiryHours
+            const expiryHours =
+              rawExpiry !== null && rawExpiry !== undefined ? Number(rawExpiry) : 24
             const appliedTime = new Date(app.applied_at).getTime()
             const elapsedHours = (now - appliedTime) / (1000 * 60 * 60)
 
-            if (elapsedHours >= expiryHours) {
+            // ★ expiryHours が 0（無制限）のときは自動期限切れにしない
+            if (expiryHours > 0 && elapsedHours >= expiryHours) {
               await supabase
                 .from('applications')
                 .update({ status: '期限切れ（未回答）' })
@@ -297,6 +300,11 @@ export function Dashboard() {
 
           const calculatedSpotsLeft = Math.max(0, spotsTotalVal - totalBookedCount)
 
+          const resolvedExpiryHours =
+            item.expiry_hours !== null && item.expiry_hours !== undefined
+              ? Number(item.expiry_hours)
+              : 24
+
           return {
             id: item.id,
             title: item.title || '無題の実験',
@@ -308,6 +316,7 @@ export function Dashboard() {
             location: item.location || (isOnline ? 'オンライン（Webアンケート）' : 'SFC オミクロン館'),
             mode: isOnline ? 'online' : 'in-person',
             durationMins: Number(item.duration_mins) || parseInt(item.duration) || 30,
+            duration_mins: Number(item.duration_mins) || parseInt(item.duration) || 30,
             rewardAmount: isOnline ? 0 : Number(item.reward_amount) || 0,
             rewardType: isOnline ? '謝礼なし' : item.reward_type || 'Amazonギフト券',
             reward: rewardText,
@@ -329,7 +338,8 @@ export function Dashboard() {
             description: item.description || '',
             ethicsId: item.ethics_id || 'ETH-2026-PENDING',
             surveyUrl: item.survey_url || undefined,
-            expiryHours: Number(item.expiry_hours || 24),
+            expiryHours: resolvedExpiryHours,
+            expiry_hours: resolvedExpiryHours,
             slots: updatedSlots,
           } as any
         })
@@ -356,7 +366,7 @@ export function Dashboard() {
     }
   }, [authLoading, experiments, fetchUserBookings])
 
-  // ★ URLパラメータ (?exp=ID) から限定公開・個別共有案件を自動で開く
+  // URLパラメータ (?exp=ID) から限定公開・個別共有案件を自動で開く
   useEffect(() => {
     if (initialDeepLinkHandled.current || experiments.length === 0) return
     if (typeof window === 'undefined') return
@@ -384,7 +394,6 @@ export function Dashboard() {
     }
   }
 
-  // ★ 一覧に表示する公開案件のみ（isPrivate === true のクローズ案件は除外）
   const publicExperiments = useMemo(() => {
     return experiments.filter((exp) => !(exp as any).isPrivate && !(exp as any).is_private)
   }, [experiments])

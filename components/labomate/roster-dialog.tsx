@@ -26,6 +26,7 @@ import {
   Save,
   RotateCcw,
   AlertTriangle,
+  Trash2,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
@@ -60,6 +61,7 @@ export function RosterDialog({
   const [applicants, setApplicants] = useState<ApplicantRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [resettingId, setResettingId] = useState<string | null>(null)
   const [selectedSlotFilter, setSelectedSlotFilter] = useState<string>('all')
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<string | null>(null)
 
@@ -75,6 +77,7 @@ export function RosterDialog({
         .select('*')
         .eq('experiment_id', experiment.id)
         .neq('status', 'キャンセル済み')
+        .neq('status', '中止・募集終了')
         .order('applied_at', { ascending: true })
 
       if (error) {
@@ -185,19 +188,26 @@ export function RosterDialog({
       })
 
       for (const rec of changedRecords) {
+        const updatePayload: any = {
+          attendance_status: rec.attendance_status,
+          status: rec.status,
+          admin_memo: rec.admin_memo || null,
+        }
+
+        // ★ オンライン調査で「未設定（確定）」に戻した場合、応募日時を現在時刻に更新して即期限切れを防ぐ
+        if (isOnline && rec.attendance_status === '未設定' && rec.status === '確定') {
+          updatePayload.applied_at = new Date().toISOString()
+        }
+
         const { error } = await supabase
           .from('applications')
-          .update({
-            attendance_status: rec.attendance_status,
-            status: rec.status,
-            admin_memo: rec.admin_memo || null,
-          })
+          .update(updatePayload)
           .eq('id', rec.id)
 
         if (error) throw error
       }
 
-      setOriginalApplicants([...applicants])
+      await fetchApplicants()
       setSaveSuccessNotice(`名簿の変更（${changedRecords.length}件）を保存しました！`)
 
       if (onRosterUpdated) {
@@ -212,6 +222,84 @@ export function RosterDialog({
       alert(err.message || '名簿の保存に失敗しました。')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // ★ 特定ユーザーの応募を完全にリセット（未応募の初期状態に戻し、枠を1つ返却する）
+  const handleResetUserSlot = async (app: ApplicantRecord) => {
+    const targetName = app.applicant_name_native || app.applicant_name || app.applicant_email
+    const confirmed = window.confirm(
+      `${targetName} さんの応募をリセット（取り消し）しますか？\n\n` +
+        `・このユーザーは未応募の初期状態に戻り、再度エントリーできるようになります。\n` +
+        `・確保されていた参加枠が1つ返却されます。`
+    )
+    if (!confirmed) return
+
+    setResettingId(app.id)
+    setSaveSuccessNotice(null)
+
+    try {
+      const { error: cancelErr } = await supabase
+        .from('applications')
+        .update({ status: 'キャンセル済み' })
+        .eq('id', app.id)
+
+      if (cancelErr) throw cancelErr
+
+      // 期限切れ以外のアクティブ枠だった場合、募集側の残枠を1つ戻す
+      if (app.status !== '期限切れ（未回答）') {
+        const { data: currentDbExp, error: fetchErr } = await supabase
+          .from('experiments')
+          .select('spots_left, spots_total, slots')
+          .eq('id', experiment.id)
+          .single()
+
+        if (!fetchErr && currentDbExp) {
+          const totalVal = Number(currentDbExp.spots_total ?? 10)
+          const leftVal = Number(currentDbExp.spots_left ?? 0)
+          const nextSpotsLeft = Math.min(totalVal, leftVal + 1)
+
+          let dbSlots = currentDbExp.slots
+          if (typeof dbSlots === 'string') {
+            try { dbSlots = JSON.parse(dbSlots) } catch (e) { dbSlots = [] }
+          }
+          let updatedSlots = Array.isArray(dbSlots) ? [...dbSlots] : []
+
+          if (!isOnline && updatedSlots.length > 0 && app.slot_id) {
+            updatedSlots = updatedSlots.map((slot: any) => {
+              if (String(slot.id) === String(app.slot_id)) {
+                const currentBooked = Number(slot.bookedCount ?? slot.currentParticipants ?? 0)
+                return { ...slot, bookedCount: Math.max(0, currentBooked - 1) }
+              }
+              return slot
+            })
+          }
+
+          await supabase
+            .from('experiments')
+            .update({
+              spots_left: nextSpotsLeft,
+              slots: updatedSlots,
+            })
+            .eq('id', experiment.id)
+        }
+      }
+
+      await fetchApplicants()
+      setSaveSuccessNotice(`${targetName} さんの応募をリセットし、枠を初期状態に戻しました。`)
+
+      if (onRosterUpdated) {
+        onRosterUpdated()
+      }
+
+      setTimeout(() => {
+        setSaveSuccessNotice(null)
+      }, 3500)
+    } catch (err: any) {
+      console.error('Reset user slot error:', err)
+      alert(err.message || '枠のリセットに失敗しました。')
+    } finally {
+      setResettingId(null)
     }
   }
 
@@ -271,7 +359,7 @@ export function RosterDialog({
       <DialogContent className="w-[95vw] sm:max-w-2xl md:max-w-3xl max-h-[88dvh] flex flex-col p-0 overflow-hidden">
         {/* ヘッダー */}
         <DialogHeader className="p-4 sm:p-5 border-b bg-muted/20 space-y-2 shrink-0">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between pr-6">
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px]">
                 {isOnline ? (
@@ -370,6 +458,7 @@ export function RosterDialog({
           ) : (
             <div className="space-y-3">
               {filteredApplicants.map((app, index) => {
+                const isExpired = app.status === '期限切れ（未回答）'
                 const isAppDone = app.status?.includes('完了')
                 const isAttended = app.attendance_status === '出席'
                 const isAbsent = app.attendance_status === '欠席'
@@ -380,7 +469,9 @@ export function RosterDialog({
                 return (
                   <div
                     key={app.id || index}
-                    className="p-3.5 sm:p-4 rounded-xl border bg-card space-y-3 text-xs shadow-xs hover:border-foreground/30 transition-all"
+                    className={`p-3.5 sm:p-4 rounded-xl border bg-card space-y-3 text-xs shadow-xs hover:border-foreground/30 transition-all ${
+                      isExpired ? 'opacity-75 border-dashed' : ''
+                    }`}
                   >
                     {/* 上段：名前・メアド・ステータス */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
@@ -398,7 +489,9 @@ export function RosterDialog({
                           <Badge
                             variant="secondary"
                             className={`text-[10px] px-2 py-0.5 font-bold ${
-                              isAppDone
+                              isExpired
+                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                : isAppDone
                                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                                 : 'bg-primary/10 text-primary border-primary/20'
                             }`}
@@ -426,94 +519,114 @@ export function RosterDialog({
                       </div>
                     </div>
 
-                    {/* 下段：出欠・提出判定ボタングループ */}
-                    <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                      <span className="text-xs font-semibold text-muted-foreground mr-1">
-                        {isOnline ? '回答状態:' : '出欠:'}
-                      </span>
+                    {/* 下段：出欠・提出判定ボタン ＋ 枠リセットボタン */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-muted-foreground mr-1">
+                          {isOnline ? '回答状態:' : '出欠:'}
+                        </span>
 
-                      {isOnline ? (
-                        <>
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant={isSubmitted ? 'default' : 'outline'}
-                            onClick={() => handleStageAttendance(app.id, '提出済み')}
-                            className={`h-7 px-2.5 text-xs font-bold gap-1 ${
-                              isSubmitted
-                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                                : ''
-                            }`}
-                            title="フォーム提出確認済み（承認）"
-                          >
-                            <Check className="size-3.5" />
-                            <span>提出済み</span>
-                          </Button>
+                        {isOnline ? (
+                          <>
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant={isSubmitted ? 'default' : 'outline'}
+                              onClick={() => handleStageAttendance(app.id, '提出済み')}
+                              className={`h-7 px-2.5 text-xs font-bold gap-1 ${
+                                isSubmitted
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                  : ''
+                              }`}
+                              title="フォーム提出確認済み（承認）"
+                            >
+                              <Check className="size-3.5" />
+                              <span>提出済み</span>
+                            </Button>
 
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant={isNotSubmitted ? 'destructive' : 'outline'}
-                            onClick={() => handleStageAttendance(app.id, '未提出')}
-                            className={`h-7 px-2.5 text-xs font-bold gap-1 ${
-                              isNotSubmitted ? 'shadow-xs' : ''
-                            }`}
-                            title="フォーム回答が確認できなかったため無効として終了（再応募不可）"
-                          >
-                            <X className="size-3.5" />
-                            <span>未提出</span>
-                          </Button>
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant={isNotSubmitted ? 'destructive' : 'outline'}
+                              onClick={() => handleStageAttendance(app.id, '未提出')}
+                              className={`h-7 px-2.5 text-xs font-bold gap-1 ${
+                                isNotSubmitted ? 'shadow-xs' : ''
+                              }`}
+                              title="フォーム回答が確認できなかったため無効として終了（再応募不可）"
+                            >
+                              <X className="size-3.5" />
+                              <span>未提出</span>
+                            </Button>
 
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant={isUnset ? 'secondary' : 'ghost'}
-                            onClick={() => handleStageAttendance(app.id, '未設定')}
-                            className="h-7 px-2 text-xs text-muted-foreground"
-                            title="回答待ち状態に戻す"
-                          >
-                            未設定
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant={isAttended ? 'default' : 'outline'}
-                            onClick={() => handleStageAttendance(app.id, '出席')}
-                            className={`h-7 px-2.5 text-xs font-bold gap-1 ${
-                              isAttended ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs' : ''
-                            }`}
-                          >
-                            <Check className="size-3.5" />
-                            <span>出席</span>
-                          </Button>
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant={isUnset ? 'secondary' : 'ghost'}
+                              onClick={() => handleStageAttendance(app.id, '未設定')}
+                              className="h-7 px-2 text-xs text-muted-foreground"
+                              title="回答待ち状態（確定）に戻す"
+                            >
+                              未設定
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant={isAttended ? 'default' : 'outline'}
+                              onClick={() => handleStageAttendance(app.id, '出席')}
+                              className={`h-7 px-2.5 text-xs font-bold gap-1 ${
+                                isAttended ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs' : ''
+                              }`}
+                            >
+                              <Check className="size-3.5" />
+                              <span>出席</span>
+                            </Button>
 
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant={isAbsent ? 'destructive' : 'outline'}
-                            onClick={() => handleStageAttendance(app.id, '欠席')}
-                            className={`h-7 px-2.5 text-xs font-bold gap-1 ${
-                              isAbsent ? 'shadow-xs' : ''
-                            }`}
-                          >
-                            <X className="size-3.5" />
-                            <span>欠席</span>
-                          </Button>
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant={isAbsent ? 'destructive' : 'outline'}
+                              onClick={() => handleStageAttendance(app.id, '欠席')}
+                              className={`h-7 px-2.5 text-xs font-bold gap-1 ${
+                                isAbsent ? 'shadow-xs' : ''
+                              }`}
+                            >
+                              <X className="size-3.5" />
+                              <span>欠席</span>
+                            </Button>
 
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant={isUnset ? 'secondary' : 'ghost'}
-                            onClick={() => handleStageAttendance(app.id, '未設定')}
-                            className="h-7 px-2 text-xs text-muted-foreground"
-                          >
-                            未設定
-                          </Button>
-                        </>
-                      )}
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant={isUnset ? 'secondary' : 'ghost'}
+                              onClick={() => handleStageAttendance(app.id, '未設定')}
+                              className="h-7 px-2 text-xs text-muted-foreground"
+                            >
+                              未設定
+                            </Button>
+                          </>
+                        )}
+                      </div>
+
+                      {/* ★ 枠リセット（応募取消・初期状態に戻す）ボタン */}
+                      <Button
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                        disabled={resettingId === app.id}
+                        onClick={() => handleResetUserSlot(app)}
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1"
+                        title="このユーザーの応募を取り消して初期状態（未応募）に戻す"
+                      >
+                        {resettingId === app.id ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="size-3.5" />
+                        )}
+                        <span>枠をリセット</span>
+                      </Button>
                     </div>
 
                     {/* メモ入力欄 */}

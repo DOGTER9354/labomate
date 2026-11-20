@@ -57,7 +57,6 @@ interface ExperimentDialogProps {
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
 
-// スロットの日時文字列から開始日時をパースして過去枠かどうか判定
 function isSlotExpired(timeStr: string): boolean {
   if (!timeStr) return false
   try {
@@ -119,7 +118,6 @@ export function ExperimentDialog({
   const [hasOpenedForm, setHasOpenedForm] = useState(false)
   const [hasSubmittedSurvey, setHasSubmittedSurvey] = useState(false)
 
-  // プロフィール属性
   const [realNameNative, setRealNameNative] = useState('')
   const [realNameEnglish, setRealNameEnglish] = useState('')
   const [userDominantHand, setUserDominantHand] = useState('設定なし')
@@ -129,7 +127,6 @@ export function ExperimentDialog({
   const [loadingProfile, setLoadingProfile] = useState(false)
   const [isKeioVerified, setIsKeioVerified] = useState(false)
 
-  // 参加条件同意ステート
   const [checkedAgreements, setCheckedAgreements] = useState<Record<string, boolean>>({})
   const [isConditionsExpanded, setIsConditionsExpanded] = useState(true)
 
@@ -138,12 +135,15 @@ export function ExperimentDialog({
 
     const fetchCurrentBookings = async () => {
       try {
+        // ★ キャンセル済み・募集終了・期限切れ（未回答）を除外して再エントリー可能にする
         const { data, error } = await supabase
           .from('applications')
           .select('id, slot_id, slot_time, status, applied_at')
           .eq('experiment_id', experiment.id)
           .or(`applicant_id.eq.${user.id},applicant_email.eq.${user.email}`)
           .neq('status', 'キャンセル済み')
+          .neq('status', '中止・募集終了')
+          .neq('status', '期限切れ（未回答）')
 
         if (!error && data) {
           setAllUserAppsForThisExp(data)
@@ -261,7 +261,6 @@ export function ExperimentDialog({
     expAny.format?.includes('オンライン')
   )
 
-  // ★ 単純にURLをクリップボードにコピーする
   const handleCopyShareLink = async () => {
     if (typeof window === 'undefined') return
     const shareUrl = `${window.location.origin}/?exp=${experiment.id}`
@@ -274,7 +273,6 @@ export function ExperimentDialog({
     }
   }
 
-  // ★ OSの共有シート（AirDrop / LINE / Messages等）を開く
   const handleNativeShare = async () => {
     if (typeof window === 'undefined') return
     const shareUrl = `${window.location.origin}/?exp=${experiment.id}`
@@ -288,19 +286,18 @@ export function ExperimentDialog({
           url: shareUrl,
         })
         return
-      } catch (e) {
-        // キャンセル時は何もしない
-      }
+      } catch (e) {}
     } else {
       handleCopyShareLink()
     }
   }
 
   const surveyUrl = expAny.survey_url || expAny.surveyUrl
-  const expiryHours = Number(expAny.expiry_hours || expAny.expiryHours || 24)
+  const rawExpiry = expAny.expiry_hours ?? expAny.expiryHours
+  const expiryHours =
+    rawExpiry !== null && rawExpiry !== undefined ? Number(rawExpiry) : 24
   const allowMultipleSlots = Boolean(expAny.allow_multiple_slots || expAny.allowMultipleSlots)
 
-  // 1. 研究倫理チェック
   const ethicsConditions: { id: string; label: string }[] = []
   if (expAny.filter_prior_knowledge ?? expAny.requirements?.some((r: string) => r.includes('事前知識なし'))) {
     ethicsConditions.push({
@@ -315,7 +312,6 @@ export function ExperimentDialog({
     })
   }
 
-  // 2. 属性照合（利き手・視力・性別）
   const reqHand = expAny.required_dominant_hand || (expAny.requirements?.some((r: string) => r.includes('右利き')) ? 'right' : expAny.requirements?.some((r: string) => r.includes('左利き')) ? 'left' : 'any')
   const reqVision = expAny.required_vision || (expAny.requirements?.some((r: string) => r.includes('裸眼')) ? 'naked' : expAny.requirements?.some((r: string) => r.includes('矯正視力')) ? 'corrected' : 'any')
   const reqGender = expAny.required_gender || (expAny.requirements?.some((r: string) => r.includes('男性限定')) ? 'male' : expAny.requirements?.some((r: string) => r.includes('女性限定')) ? 'female' : 'any')
@@ -644,8 +640,11 @@ export function ExperimentDialog({
     valueDisplay = '支給あり'
   }
 
+  // ★ durationMins も参照して正確な所要時間を表示
   const durationText =
-    typeof expAny.durationMinutes === 'number'
+    typeof expAny.durationMins === 'number'
+      ? `${expAny.durationMins}分`
+      : typeof expAny.durationMinutes === 'number'
       ? `${expAny.durationMinutes}分`
       : typeof expAny.duration_mins === 'number'
       ? `${expAny.duration_mins}分`
@@ -688,7 +687,6 @@ export function ExperimentDialog({
               )}
             </div>
 
-            {/* ★ 「リンクコピー」と「共有（アプリ連携）」の2ボタン */}
             <div className="flex items-center gap-1.5 shrink-0">
               <Button
                 type="button"
@@ -1105,9 +1103,13 @@ export function ExperimentDialog({
                         : 'まず枠を確保（仮押さえ）します。回答中に他の人に枠を取られる心配はありません。'}
                     </p>
                   </div>
-                  {expiryHours > 0 && (
-                    <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30 font-semibold">
+                  {expiryHours > 0 ? (
+                    <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30 font-semibold shrink-0">
                       有効期限: {expiryHours}時間以内
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30 font-semibold shrink-0">
+                      有効期限: 無制限
                     </Badge>
                   )}
                 </div>
@@ -1179,7 +1181,9 @@ export function ExperimentDialog({
                   <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 flex items-start gap-2.5 text-xs">
                     <BookmarkCheck className="size-4 text-primary shrink-0 mt-0.5" />
                     <p className="text-muted-foreground leading-relaxed text-[11px]">
-                      「枠を確保して参加する」を押すと、あなたの回答枠が直ちに1枠キープされます。確保後は設定された期限内（{expiryHours}時間以内）にダッシュボードからいつでも落ち着いて回答できます。
+                      「枠を確保して参加する」を押すと、あなたの回答枠が直ちに1枠キープされます。確保後は
+                      {expiryHours > 0 ? `設定された期限内（${expiryHours}時間以内）に` : ''}
+                      ダッシュボードからいつでも落ち着いて回答できます。
                     </p>
                   </div>
                 )}

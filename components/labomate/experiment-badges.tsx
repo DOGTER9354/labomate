@@ -1,4 +1,4 @@
-import { Brain, ClipboardList, Glasses, TrendingUp, type LucideIcon } from 'lucide-react'
+import { Brain, ClipboardList, Glasses, MessageSquare, TrendingUp, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isFewSpotsLeft, type Experiment, type ExperimentCategory } from '@/lib/experiments'
 
@@ -7,6 +7,7 @@ const CATEGORY_ICONS: Record<ExperimentCategory, LucideIcon> = {
   'Behavioral Economics': TrendingUp,
   'VR / Eye-Tracking': Glasses,
   'Online Survey': ClipboardList,
+  'Language & Communication': MessageSquare,
 }
 
 export function StatusBadge({ experiment }: { experiment: Experiment }) {
