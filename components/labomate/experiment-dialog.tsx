@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   MapPin,
   Clock,
+  Timer,
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
@@ -56,6 +57,50 @@ interface ExperimentDialogProps {
 }
 
 const PROFILE_STORAGE_KEY = 'labomate_user_profile'
+
+function formatRemainingTime(
+  appliedAt: string,
+  expiryHours: number,
+  nowMs: number
+): { text: string; isUrgent: boolean; isExpired: boolean } {
+  if (expiryHours <= 0) {
+    return { text: '無制限', isUrgent: false, isExpired: false }
+  }
+  const deadlineMs = new Date(appliedAt).getTime() + expiryHours * 60 * 60 * 1000
+  const diffMs = deadlineMs - nowMs
+  if (diffMs <= 0) {
+    return { text: '期限切れ', isUrgent: true, isExpired: true }
+  }
+  const totalSec = Math.floor(diffMs / 1000)
+  const days = Math.floor(totalSec / 86400)
+  const hours = Math.floor((totalSec % 86400) / 3600)
+  const mins = Math.floor((totalSec % 3600) / 60)
+  const secs = totalSec % 60
+
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const text =
+    days > 0
+      ? `${days}日 ${hours}時間${pad(mins)}分${pad(secs)}秒`
+      : hours > 0
+      ? `${hours}時間${pad(mins)}分${pad(secs)}秒`
+      : `${mins}分${pad(secs)}秒`
+
+  return { text, isUrgent: diffMs < 60 * 60 * 1000, isExpired: false }
+}
+
+function formatAppliedDateTime(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return dateStr
+  }
+}
 
 function isSlotExpired(timeStr: string): boolean {
   if (!timeStr) return false
@@ -110,6 +155,7 @@ export function ExperimentDialog({
   const [successMessage, setSuccessMessage] = useState('応募が完了しました！')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [copiedShareUrl, setCopiedShareUrl] = useState(false)
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   const [userBookedSlots, setUserBookedSlots] = useState<{ id?: string; time?: string; status?: string }[]>([])
   const [existingOnlineApp, setExistingOnlineApp] = useState<any | null>(null)
@@ -131,11 +177,19 @@ export function ExperimentDialog({
   const [isConditionsExpanded, setIsConditionsExpanded] = useState(true)
 
   useEffect(() => {
+    if (!open || !existingOnlineApp) return
+    setNowMs(Date.now())
+    const timer = setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [open, existingOnlineApp])
+
+  useEffect(() => {
     if (!open || !user || !experiment) return
 
     const fetchCurrentBookings = async () => {
       try {
-        // ★ キャンセル済み・募集終了・期限切れ（未回答）を除外して再エントリー可能にする
         const { data, error } = await supabase
           .from('applications')
           .select('id, slot_id, slot_time, status, applied_at')
@@ -399,6 +453,11 @@ export function ExperimentDialog({
     )
   )
 
+  const remainingInfo =
+    isOnline && isOnlineReserved && existingOnlineApp?.applied_at
+      ? formatRemainingTime(existingOnlineApp.applied_at, expiryHours, nowMs)
+      : null
+
   const hasInPersonBooking = userBookedSlots.length > 0 && !isOnline
   const isBlockedBySingleSlotRule = !allowMultipleSlots && hasInPersonBooking
   const isBlockedOnlineNewEntry = !allowMultipleSlots && isOnline && allUserAppsForThisExp.length > 0 && !isOnlineReserved
@@ -640,7 +699,6 @@ export function ExperimentDialog({
     valueDisplay = '支給あり'
   }
 
-  // ★ durationMins も参照して正確な所要時間を表示
   const durationText =
     typeof expAny.durationMins === 'number'
       ? `${expAny.durationMins}分`
@@ -776,7 +834,7 @@ export function ExperimentDialog({
               </div>
             )}
 
-            {/* 謝礼・所要時間インフォ */}
+            {/* 謝礼・所要時間・回答有効時間インフォ */}
             <div className="grid grid-cols-2 gap-2.5 p-3.5 rounded-xl bg-muted/30 border text-xs">
               <div className="p-2.5 rounded-lg bg-card/70 border border-border/50 space-y-1">
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
@@ -819,6 +877,25 @@ export function ExperimentDialog({
                   {isOnline ? 'オンライン（Webアンケート）' : (experiment.location || '詳細は応募後に案内')}
                 </p>
               </div>
+
+              {/* ★ オンライン調査の場合：応募後の回答有効時間を明確に表示 */}
+              {isOnline && (
+                <div className="col-span-2 p-2.5 rounded-lg bg-card/70 border border-border/50 flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-medium">
+                    <Timer className="size-3.5 text-amber-500 shrink-0" />
+                    <span>回答有効時間（枠確保後の回答期限）</span>
+                  </span>
+                  <span
+                    className={`font-bold text-xs shrink-0 ${
+                      expiryHours > 0
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {expiryHours > 0 ? `${expiryHours}時間以内` : '無制限（期限なし）'}
+                  </span>
+                </div>
+              )}
             </div>
 
             {requiresKeioBadge && (
@@ -1091,7 +1168,7 @@ export function ExperimentDialog({
 
             {isOnline ? (
               <div className="space-y-3.5 p-4 rounded-xl border bg-card/70">
-                <div className="flex items-center justify-between border-b pb-2.5">
+                <div className="flex items-center justify-between border-b pb-2.5 gap-2">
                   <div className="space-y-0.5">
                     <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
                       <Globe2 className="size-4 text-primary" />
@@ -1105,14 +1182,49 @@ export function ExperimentDialog({
                   </div>
                   {expiryHours > 0 ? (
                     <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30 font-semibold shrink-0">
-                      有効期限: {expiryHours}時間以内
+                      有効時間: {expiryHours}時間以内
                     </Badge>
                   ) : (
                     <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30 font-semibold shrink-0">
-                      有効期限: 無制限
+                      有効時間: 無制限
                     </Badge>
                   )}
                 </div>
+
+                {/* ★ 枠確保済みの場合：エントリー日時・有効時間・リアルタイム残り時間 */}
+                {isOnlineReserved && existingOnlineApp && remainingInfo && (
+                  <div className="p-3 rounded-xl bg-muted/30 border space-y-1.5 text-[11px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">エントリー日時</span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {formatAppliedDateTime(existingOnlineApp.applied_at)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">回答有効時間</span>
+                      <span className="font-semibold text-foreground">
+                        {expiryHours > 0 ? `${expiryHours}時間以内` : '無制限'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-border/60">
+                      <span className="text-muted-foreground flex items-center gap-1 font-medium">
+                        <Timer className="size-3.5 text-primary" />
+                        <span>回答残り時間</span>
+                      </span>
+                      <span
+                        className={`font-mono font-bold ${
+                          remainingInfo.isExpired || remainingInfo.isUrgent
+                            ? 'text-rose-500'
+                            : expiryHours > 0
+                            ? 'text-amber-500'
+                            : 'text-emerald-500'
+                        }`}
+                      >
+                        {remainingInfo.text}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {isOnlineReserved ? (
                   <div className="space-y-3">
@@ -1182,7 +1294,7 @@ export function ExperimentDialog({
                     <BookmarkCheck className="size-4 text-primary shrink-0 mt-0.5" />
                     <p className="text-muted-foreground leading-relaxed text-[11px]">
                       「枠を確保して参加する」を押すと、あなたの回答枠が直ちに1枠キープされます。確保後は
-                      {expiryHours > 0 ? `設定された期限内（${expiryHours}時間以内）に` : ''}
+                      {expiryHours > 0 ? `回答有効時間内（${expiryHours}時間以内）に` : ''}
                       ダッシュボードからいつでも落ち着いて回答できます。
                     </p>
                   </div>

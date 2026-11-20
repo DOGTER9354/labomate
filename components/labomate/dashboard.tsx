@@ -10,6 +10,7 @@ import {
   Globe2,
   CheckCircle2,
   Clock,
+  Timer,
   MapPin,
   ArrowRight,
   Gift,
@@ -57,6 +58,50 @@ interface UserApplicationRecord {
   applied_at: string
 }
 
+function formatRemainingTime(
+  appliedAt: string,
+  expiryHours: number,
+  nowMs: number
+): { text: string; isUrgent: boolean; isExpired: boolean } {
+  if (expiryHours <= 0) {
+    return { text: '無制限', isUrgent: false, isExpired: false }
+  }
+  const deadlineMs = new Date(appliedAt).getTime() + expiryHours * 60 * 60 * 1000
+  const diffMs = deadlineMs - nowMs
+  if (diffMs <= 0) {
+    return { text: '期限切れ', isUrgent: true, isExpired: true }
+  }
+  const totalSec = Math.floor(diffMs / 1000)
+  const days = Math.floor(totalSec / 86400)
+  const hours = Math.floor((totalSec % 86400) / 3600)
+  const mins = Math.floor((totalSec % 3600) / 60)
+  const secs = totalSec % 60
+
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const text =
+    days > 0
+      ? `${days}日 ${hours}時間${pad(mins)}分${pad(secs)}秒`
+      : hours > 0
+      ? `${hours}時間${pad(mins)}分${pad(secs)}秒`
+      : `${mins}分${pad(secs)}秒`
+
+  return { text, isUrgent: diffMs < 60 * 60 * 1000, isExpired: false }
+}
+
+function formatAppliedDateTime(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return dateStr
+  }
+}
+
 export function Dashboard() {
   const { user, loading: authLoading } = useAuth()
   const { t, language } = useLanguage()
@@ -80,6 +125,7 @@ export function Dashboard() {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [userName, setUserName] = useState('周誠')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const initialDeepLinkHandled = useRef(false)
 
   // PWA（アプリダウンロード）状態管理
@@ -173,7 +219,6 @@ export function Dashboard() {
             const appliedTime = new Date(app.applied_at).getTime()
             const elapsedHours = (now - appliedTime) / (1000 * 60 * 60)
 
-            // ★ expiryHours が 0（無制限）のときは自動期限切れにしない
             if (expiryHours > 0 && elapsedHours >= expiryHours) {
               await supabase
                 .from('applications')
@@ -366,7 +411,6 @@ export function Dashboard() {
     }
   }, [authLoading, experiments, fetchUserBookings])
 
-  // URLパラメータ (?exp=ID) から限定公開・個別共有案件を自動で開く
   useEffect(() => {
     if (initialDeepLinkHandled.current || experiments.length === 0) return
     if (typeof window === 'undefined') return
@@ -481,6 +525,26 @@ export function Dashboard() {
   const nextOnlineBooking = onlineReservedBookings.length > 0 ? onlineReservedBookings[0] : null
   const nextOnlineExperiment = nextOnlineBooking
     ? experiments.find((e) => String(e.id) === String(nextOnlineBooking.experiment_id))
+    : null
+
+  const nextOnlineExpiryHours = useMemo(() => {
+    const expAny = nextOnlineExperiment as any
+    const raw = expAny?.expiry_hours ?? expAny?.expiryHours
+    return raw !== null && raw !== undefined ? Number(raw) : 24
+  }, [nextOnlineExperiment])
+
+  // ★ 回答待ちオンライン調査があるときだけ1秒ごとにリアルタイム更新
+  useEffect(() => {
+    if (!nextOnlineBooking) return
+    setNowMs(Date.now())
+    const timer = setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [nextOnlineBooking])
+
+  const nextOnlineRemaining = nextOnlineBooking
+    ? formatRemainingTime(nextOnlineBooking.applied_at, nextOnlineExpiryHours, nowMs)
     : null
 
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
@@ -685,9 +749,26 @@ export function Dashboard() {
                       <HeartHandshake className="size-3.5 text-muted-foreground" />
                       <span>学内協力（謝礼なし）</span>
                     </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      エントリー日: {new Date(nextOnlineBooking.applied_at).toLocaleDateString('ja-JP')}
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      エントリー: {formatAppliedDateTime(nextOnlineBooking.applied_at)}
                     </span>
+                    <span className="text-[11px] text-foreground/80 font-medium">
+                      回答有効時間: {nextOnlineExpiryHours > 0 ? `${nextOnlineExpiryHours}時間以内` : '無制限'}
+                    </span>
+                    {nextOnlineRemaining && (
+                      <span
+                        className={`flex items-center gap-1 text-[11px] font-mono font-bold ${
+                          nextOnlineRemaining.isExpired || nextOnlineRemaining.isUrgent
+                            ? 'text-rose-500'
+                            : nextOnlineExpiryHours > 0
+                            ? 'text-amber-500'
+                            : 'text-emerald-500'
+                        }`}
+                      >
+                        <Timer className="size-3.5" />
+                        <span>回答残り時間: {nextOnlineRemaining.text}</span>
+                      </span>
+                    )}
                   </div>
                 </div>
 

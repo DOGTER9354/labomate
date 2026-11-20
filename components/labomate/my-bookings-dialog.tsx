@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Calendar,
   Clock,
+  Timer,
   Building2,
   Globe2,
   XCircle,
@@ -44,6 +45,50 @@ interface ApplicationItem {
   applied_at: string
 }
 
+function formatRemainingTime(
+  appliedAt: string,
+  expiryHours: number,
+  nowMs: number
+): { text: string; isUrgent: boolean; isExpired: boolean } {
+  if (expiryHours <= 0) {
+    return { text: '無制限', isUrgent: false, isExpired: false }
+  }
+  const deadlineMs = new Date(appliedAt).getTime() + expiryHours * 60 * 60 * 1000
+  const diffMs = deadlineMs - nowMs
+  if (diffMs <= 0) {
+    return { text: '期限切れ', isUrgent: true, isExpired: true }
+  }
+  const totalSec = Math.floor(diffMs / 1000)
+  const days = Math.floor(totalSec / 86400)
+  const hours = Math.floor((totalSec % 86400) / 3600)
+  const mins = Math.floor((totalSec % 3600) / 60)
+  const secs = totalSec % 60
+
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const text =
+    days > 0
+      ? `${days}日 ${hours}時間${pad(mins)}分${pad(secs)}秒`
+      : hours > 0
+      ? `${hours}時間${pad(mins)}分${pad(secs)}秒`
+      : `${mins}分${pad(secs)}秒`
+
+  return { text, isUrgent: diffMs < 60 * 60 * 1000, isExpired: false }
+}
+
+function formatAppliedDateTime(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return dateStr
+  }
+}
+
 export function MyBookingsDialog({
   open,
   onOpenChange,
@@ -53,11 +98,12 @@ export function MyBookingsDialog({
 }: MyBookingsDialogProps) {
   const { user } = useAuth()
   const [applications, setApplications] = useState<ApplicationItem[]>([])
+  const [expiryMap, setExpiryMap] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
   const [cancelingId, setCancelingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
-  // 内部のアクティブタブ
   const [activeTab, setActiveTab] = useState<BookingModalType>(initialType)
 
   useEffect(() => {
@@ -67,9 +113,20 @@ export function MyBookingsDialog({
     }
   }, [open, initialType])
 
+  // ★ モーダルが開いている間、1秒ごとに残り時間をリアルタイム更新
+  useEffect(() => {
+    if (!open) return
+    setNowMs(Date.now())
+    const timer = setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [open])
+
   const fetchMyBookings = useCallback(async () => {
     if (!user) {
       setApplications([])
+      setExpiryMap({})
       return
     }
 
@@ -81,29 +138,64 @@ export function MyBookingsDialog({
         .or(`applicant_id.eq.${user.id},applicant_email.eq.${user.email}`)
         .neq('status', 'キャンセル済み')
         .neq('status', '中止・募集終了')
+        .neq('status', '期限切れ（未回答）')
         .order('applied_at', { ascending: false })
 
       if (!error && data) {
-        // 回答完了済みのものはアクティブ予定から除外（マイページ履歴へ送る）
         const activeOnly = data.filter((item) => {
-          if (item.status?.includes('回答完了') || item.status === '完了') {
+          if (
+            item.status?.includes('回答完了') ||
+            item.status === '完了' ||
+            item.status?.includes('無効')
+          ) {
             return false
           }
           return true
         })
 
-        // 期限切れのオンライン回答チェック（自動失効処理）
+        // 関連する募集の expiry_hours を取得
+        const expIds = Array.from(new Set(activeOnly.map((a) => a.experiment_id).filter(Boolean)))
+        const nextExpiryMap: Record<string, number> = {}
+
+        if (expIds.length > 0) {
+          const { data: expData } = await supabase
+            .from('experiments')
+            .select('id, expiry_hours')
+            .in('id', expIds)
+
+          if (expData) {
+            for (const exp of expData) {
+              nextExpiryMap[String(exp.id)] =
+                exp.expiry_hours !== null && exp.expiry_hours !== undefined
+                  ? Number(exp.expiry_hours)
+                  : 24
+            }
+          }
+        }
+
+        // 各募集の設定（expiry_hours > 0）に基づいて期限切れチェック
         const now = Date.now()
         const expiredApps: ApplicationItem[] = []
         const validApps: ApplicationItem[] = []
 
         for (const item of activeOnly) {
-          if (item.format === 'オンライン' || item.slot_id === 'online_survey') {
-            const appliedTime = new Date(item.applied_at).getTime()
-            const maxDuration = 48 * 60 * 60 * 1000
-            if (now - appliedTime > maxDuration) {
-              expiredApps.push(item)
-              continue
+          const isOnline =
+            item.format === 'オンライン' ||
+            item.slot_id === 'online_survey' ||
+            item.slot_time?.includes('オンライン')
+
+          if (isOnline) {
+            const expExpiry =
+              nextExpiryMap[String(item.experiment_id)] !== undefined
+                ? nextExpiryMap[String(item.experiment_id)]
+                : 24
+            if (expExpiry > 0) {
+              const appliedTime = new Date(item.applied_at).getTime()
+              const maxDuration = expExpiry * 60 * 60 * 1000
+              if (now - appliedTime >= maxDuration) {
+                expiredApps.push(item)
+                continue
+              }
             }
           }
           validApps.push(item)
@@ -113,11 +205,12 @@ export function MyBookingsDialog({
           const expiredIds = expiredApps.map((e) => e.id)
           supabase
             .from('applications')
-            .update({ status: 'キャンセル済み（期限切れ）' })
+            .update({ status: '期限切れ（未回答）' })
             .in('id', expiredIds)
             .then(() => {})
         }
 
+        setExpiryMap(nextExpiryMap)
         setApplications(validApps)
       }
     } catch (err) {
@@ -141,7 +234,6 @@ export function MyBookingsDialog({
     )
   }
 
-  // 厳格に選択されたタブのみを表示
   const filteredApplications = useMemo(() => {
     if (activeTab === 'online') {
       return applications.filter((app) => isOnlineItem(app))
@@ -243,7 +335,7 @@ export function MyBookingsDialog({
           <DialogDescription className="text-xs text-muted-foreground">
             {activeTab === 'in-person'
               ? 'あなたが現在予約している対面実験の一覧です。'
-              : '回答枠を確保済みのオンライン調査です。期限内にご回答ください。'}
+              : '回答枠を確保済みのオンライン調査です。有効時間内にご回答ください。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -303,6 +395,14 @@ export function MyBookingsDialog({
             <div className="space-y-2.5">
               {filteredApplications.map((app) => {
                 const isOnline = isOnlineItem(app)
+                const expExpiry =
+                  expiryMap[String(app.experiment_id)] !== undefined
+                    ? expiryMap[String(app.experiment_id)]
+                    : 24
+                const remaining = isOnline
+                  ? formatRemainingTime(app.applied_at, expExpiry, nowMs)
+                  : null
+
                 return (
                   <div
                     key={app.id}
@@ -329,13 +429,48 @@ export function MyBookingsDialog({
                       <h4 className="text-xs sm:text-sm font-bold text-foreground leading-snug">
                         {app.experiment_title}
                       </h4>
-                      {app.slot_time && (
+                      {!isOnline && app.slot_time && (
                         <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1 font-mono">
                           <Clock className="size-3 text-primary" />
                           <span>{app.slot_time}</span>
                         </p>
                       )}
                     </div>
+
+                    {/* ★ オンライン調査のエントリー日時・有効時間・リアルタイム残り時間 */}
+                    {isOnline && remaining && (
+                      <div className="p-2.5 rounded-lg bg-muted/30 border space-y-1 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">エントリー日時</span>
+                          <span className="font-mono text-foreground font-medium">
+                            {formatAppliedDateTime(app.applied_at)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">回答有効時間</span>
+                          <span className="text-foreground font-medium">
+                            {expExpiry > 0 ? `${expExpiry}時間以内` : '無制限'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t border-border/60">
+                          <span className="text-muted-foreground flex items-center gap-1 font-medium">
+                            <Timer className="size-3 text-primary" />
+                            <span>回答残り時間</span>
+                          </span>
+                          <span
+                            className={`font-mono font-bold ${
+                              remaining.isExpired || remaining.isUrgent
+                                ? 'text-rose-500'
+                                : expExpiry > 0
+                                ? 'text-amber-500'
+                                : 'text-emerald-500'
+                            }`}
+                          >
+                            {remaining.text}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between pt-2 border-t text-[11px]">
                       <Button

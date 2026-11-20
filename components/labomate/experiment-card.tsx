@@ -8,6 +8,7 @@ import {
   Globe2,
   MapPin,
   Clock,
+  Timer,
   CheckCircle2,
   Flame,
   ShieldCheck,
@@ -42,7 +43,10 @@ export function ExperimentCard({
   const expAny = experiment as any
   const isOnline = experiment.mode === 'online' || experiment.location?.includes('オンライン')
 
-  // ユーザーのプロフィール属性
+  const rawExpiry = expAny.expiry_hours ?? expAny.expiryHours
+  const expiryHours =
+    rawExpiry !== null && rawExpiry !== undefined ? Number(rawExpiry) : 24
+
   const [userProfile, setUserProfile] = useState<{
     dominantHand?: string
     vision?: string
@@ -69,16 +73,13 @@ export function ExperimentCard({
     }
   }, [])
 
-  // 慶應生限定
   const requiresKeioBadge = Boolean(expAny.requires_keio_badge || expAny.requiresKeioBadge)
 
-  // 条件の抽出（新旧両方のプロパティ・requirements配列から抽出）
   const reqHand = expAny.required_dominant_hand || (expAny.requirements?.some((r: string) => r.includes('右利き')) ? 'right' : expAny.requirements?.some((r: string) => r.includes('左利き')) ? 'left' : 'any')
   const reqVision = expAny.required_vision || (expAny.requirements?.some((r: string) => r.includes('裸眼')) ? 'naked' : expAny.requirements?.some((r: string) => r.includes('矯正視力')) ? 'corrected' : 'any')
   const filterPriorKnowledge = Boolean(expAny.filter_prior_knowledge ?? expAny.requirements?.some((r: string) => r.includes('事前知識なし')))
   const filterSameLab = Boolean(expAny.filter_same_lab ?? expAny.requirements?.some((r: string) => r.includes('同研究室')))
 
-  // 属性一致チェック（ユーザーが「設定なし」の場合は弾かない）
   const handMatched =
     reqHand === 'any' ||
     userProfile.dominantHand === '設定なし' ||
@@ -94,7 +95,6 @@ export function ExperimentCard({
     (reqVision === 'corrected' &&
       (userProfile.vision.includes('コンタクト') || userProfile.vision.includes('メガネ')))
 
-  // 属性不一致による参加不可フラグ
   const isProfileMismatched = !handMatched || !visionMatched
   const mismatchReason = !handMatched
     ? reqHand === 'right'
@@ -106,7 +106,6 @@ export function ExperimentCard({
       : '矯正視力限定'
     : ''
 
-  // 表示する条件バッジの構築
   const conditionBadges: { label: string; icon?: any }[] = []
   if (reqHand === 'right') conditionBadges.push({ label: '右利き限定', icon: Hand })
   if (reqHand === 'left') conditionBadges.push({ label: '左利き限定', icon: Hand })
@@ -115,7 +114,6 @@ export function ExperimentCard({
   if (filterPriorKnowledge) conditionBadges.push({ label: '事前知識なし限定' })
   if (filterSameLab) conditionBadges.push({ label: '同研究室不可' })
 
-  // カスタム条件（requirements から上記以外を抽出）
   if (Array.isArray(expAny.requirements)) {
     expAny.requirements.forEach((r: string) => {
       if (
@@ -132,15 +130,12 @@ export function ExperimentCard({
     })
   }
 
-  // バッジ表示の省略（最大2件 + 余り件数）
   const displayedBadges = conditionBadges.slice(0, 2)
   const remainingBadgesCount = Math.max(0, conditionBadges.length - 2)
 
-  // 総定員と残り枠数
   const total = Number(expAny.spotsTotal ?? expAny.spots_total ?? 10)
   const left = Number(expAny.spotsLeft ?? expAny.spots_left ?? total)
 
-  // 集まり状況
   const filled = Math.max(0, total - left)
   const percent = total > 0 ? Math.min(100, Math.round((filled / total) * 100)) : 0
 
@@ -193,7 +188,6 @@ export function ExperimentCard({
               </Badge>
             )}
 
-            {/* 属性不一致警告バッジ */}
             {isProfileMismatched && !isCompleted && !isApplied && (
               <Badge
                 variant="outline"
@@ -254,11 +248,21 @@ export function ExperimentCard({
           </p>
         </div>
 
-        {/* 所要時間 & 場所 */}
+        {/* 所要時間 & 回答有効時間 & 場所 */}
         <div className="space-y-1 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <Clock className="size-3.5" />
-            <span>約{expAny.durationMins || expAny.duration_mins || 30}分</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="flex items-center gap-1.5">
+              <Clock className="size-3.5" />
+              <span>約{expAny.durationMins || expAny.duration_mins || 30}分</span>
+            </span>
+            {isOnline && (
+              <span className="flex items-center gap-1 text-foreground/80 font-medium">
+                <Timer className="size-3.5 text-amber-500" />
+                <span>
+                  回答有効時間: {expiryHours > 0 ? `${expiryHours}時間以内` : '無制限'}
+                </span>
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 truncate">
             <MapPin className="size-3.5 shrink-0" />
