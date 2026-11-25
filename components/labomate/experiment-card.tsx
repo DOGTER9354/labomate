@@ -9,6 +9,7 @@ import {
   MapPin,
   Clock,
   Timer,
+  CalendarRange,
   CheckCircle2,
   Flame,
   ShieldCheck,
@@ -42,6 +43,10 @@ export function ExperimentCard({
 
   const expAny = experiment as any
   const isOnline = experiment.mode === 'online' || experiment.location?.includes('オンライン')
+  const isLongTerm = Boolean(expAny.is_long_term || expAny.isLongTerm)
+  const durationSpan = expAny.duration_span || expAny.durationSpan || ''
+  const participationFrequency =
+    expAny.participation_frequency || expAny.participationFrequency || ''
 
   const rawExpiry = expAny.expiry_hours ?? expAny.expiryHours
   const expiryHours =
@@ -160,14 +165,24 @@ export function ExperimentCard({
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
               {isOnline ? (
                 <span className="flex items-center gap-1">
-                  <Globe2 className="size-3" /> オンライン調査
+                  <Globe2 className="size-3" /> オンライン・{isLongTerm ? '継続' : '単発'}
                 </span>
               ) : (
                 <span className="flex items-center gap-1">
-                  <Building2 className="size-3" /> 学内対面
+                  <Building2 className="size-3" /> 学内対面・{isLongTerm ? '継続' : '単発'}
                 </span>
               )}
             </Badge>
+
+            {isLongTerm && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] px-1.5 py-0 bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 font-bold flex items-center gap-1"
+              >
+                <CalendarRange className="size-3" />
+                <span>継続実験{durationSpan ? `（${durationSpan}）` : ''}</span>
+              </Badge>
+            )}
 
             {requiresKeioBadge && (
               <Badge
@@ -184,7 +199,7 @@ export function ExperimentCard({
                 variant="outline"
                 className="text-[10px] px-1.5 py-0 bg-muted/60 text-muted-foreground border-border font-medium"
               >
-                <span>{isOnline ? '回答完了済み' : '参加完了済み'}</span>
+                <span>{isOnline && !isLongTerm ? '回答完了済み' : '参加完了済み'}</span>
               </Badge>
             )}
 
@@ -248,14 +263,26 @@ export function ExperimentCard({
           </p>
         </div>
 
-        {/* 所要時間 & 回答有効時間 & 場所 */}
+        {/* 所要時間・期間頻度・場所 */}
         <div className="space-y-1 text-xs text-muted-foreground">
+          {isLongTerm && (durationSpan || participationFrequency) && (
+            <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-semibold">
+              <CalendarRange className="size-3.5 shrink-0" />
+              <span className="truncate">
+                期間: {durationSpan || '継続'}
+                {participationFrequency ? ` / ${participationFrequency}` : ''}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center gap-3 flex-wrap">
             <span className="flex items-center gap-1.5">
               <Clock className="size-3.5" />
-              <span>約{expAny.durationMins || expAny.duration_mins || 30}分</span>
+              <span>
+                {isLongTerm ? '1回あたり' : ''}約{expAny.durationMins || expAny.duration_mins || 30}分
+              </span>
             </span>
-            {isOnline && (
+            {isOnline && !isLongTerm && (
               <span className="flex items-center gap-1 text-foreground/80 font-medium">
                 <Timer className="size-3.5 text-amber-500" />
                 <span>
@@ -306,7 +333,7 @@ export function ExperimentCard({
             className="h-8 text-xs font-semibold gap-1 text-muted-foreground bg-muted/40 border-border hover:bg-muted"
           >
             <Check className="size-3.5" />
-            <span>{isOnline ? '提出済み' : '参加済み'}</span>
+            <span>{isOnline && !isLongTerm ? '提出済み' : '参加済み'}</span>
           </Button>
         ) : isApplied ? (
           <Button
@@ -316,7 +343,7 @@ export function ExperimentCard({
             className="h-8 text-xs font-bold gap-1 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20"
           >
             <CheckCircle2 className="size-3.5" />
-            <span>応募済み</span>
+            <span>{isLongTerm ? '参加中' : '応募済み'}</span>
           </Button>
         ) : isProfileMismatched ? (
           <Button

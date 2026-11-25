@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Clock,
   Timer,
+  CalendarRange,
   MapPin,
   ArrowRight,
   Gift,
@@ -128,7 +129,6 @@ export function Dashboard() {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const initialDeepLinkHandled = useRef(false)
 
-  // PWA（アプリダウンロード）状態管理
   const [isStandaloneApp, setIsStandaloneApp] = useState(true)
   const [isIosDevice, setIsIosDevice] = useState(false)
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
@@ -211,8 +211,11 @@ export function Dashboard() {
             app.slot_id === 'online_survey' ||
             app.slot_time?.includes('オンライン')
 
-          if (isOnline && !isDone && app.status === '確定') {
-            const matchedExp = experiments.find((e) => String(e.id) === expId) as any
+          const matchedExp = experiments.find((e) => String(e.id) === expId) as any
+          const isExpLongTerm = Boolean(matchedExp?.is_long_term || matchedExp?.isLongTerm)
+
+          // ★ 単発オンライン調査のみ有効期限チェック（継続実験は自動失効させない）
+          if (isOnline && !isExpLongTerm && !isDone && app.status === '確定') {
             const rawExpiry = matchedExp?.expiry_hours ?? matchedExp?.expiryHours
             const expiryHours =
               rawExpiry !== null && rawExpiry !== undefined ? Number(rawExpiry) : 24
@@ -292,6 +295,8 @@ export function Dashboard() {
             item.format?.includes('online') ||
             item.location?.includes('オンライン')
 
+          const isLongTerm = Boolean(item.is_long_term)
+
           let category: ExperimentCategory = item.category || 'Cognitive Psychology'
           if (!item.category) {
             if (item.field?.includes('経済')) category = 'Behavioral Economics'
@@ -327,12 +332,13 @@ export function Dashboard() {
             }
           })
 
-          const rewardText = isOnline
-            ? '学内協力（謝礼なし）'
-            : item.reward ||
-              (Number(item.reward_amount) > 0
-                ? `${item.reward_type ? `${item.reward_type} ` : ''}${formatYen(Number(item.reward_amount))}`
-                : item.reward_type || '謝礼なし')
+          const rewardText =
+            isOnline && !isLongTerm
+              ? '学内協力（謝礼なし）'
+              : item.reward ||
+                (Number(item.reward_amount) > 0
+                  ? `${item.reward_type ? `${item.reward_type} ` : ''}${formatYen(Number(item.reward_amount))}`
+                  : item.reward_type || '謝礼なし')
 
           const slotsCapacitySum = updatedSlots.reduce(
             (acc, cur) => acc + (Number(cur.capacity) || 0),
@@ -345,10 +351,11 @@ export function Dashboard() {
 
           const calculatedSpotsLeft = Math.max(0, spotsTotalVal - totalBookedCount)
 
-          const resolvedExpiryHours =
-            item.expiry_hours !== null && item.expiry_hours !== undefined
-              ? Number(item.expiry_hours)
-              : 24
+          const resolvedExpiryHours = isLongTerm
+            ? 0
+            : item.expiry_hours !== null && item.expiry_hours !== undefined
+            ? Number(item.expiry_hours)
+            : 24
 
           return {
             id: item.id,
@@ -358,12 +365,18 @@ export function Dashboard() {
             labName: item.lab_name || item.lab || '青山研究室',
             professor: item.professor || '指導教員',
             contact: item.contact || 'contact@keio.jp',
-            location: item.location || (isOnline ? 'オンライン（Webアンケート）' : 'SFC オミクロン館'),
+            location:
+              item.location ||
+              (isOnline
+                ? isLongTerm
+                  ? 'オンライン（継続実験・Discord等）'
+                  : 'オンライン（Webアンケート）'
+                : 'SFC オミクロン館'),
             mode: isOnline ? 'online' : 'in-person',
             durationMins: Number(item.duration_mins) || parseInt(item.duration) || 30,
             duration_mins: Number(item.duration_mins) || parseInt(item.duration) || 30,
-            rewardAmount: isOnline ? 0 : Number(item.reward_amount) || 0,
-            rewardType: isOnline ? '謝礼なし' : item.reward_type || 'Amazonギフト券',
+            rewardAmount: isOnline && !isLongTerm ? 0 : Number(item.reward_amount) || 0,
+            rewardType: isOnline && !isLongTerm ? '謝礼なし' : item.reward_type || 'Amazonギフト券',
             reward: rewardText,
             spotsLeft: calculatedSpotsLeft,
             spotsTotal: Math.max(1, spotsTotalVal),
@@ -375,6 +388,14 @@ export function Dashboard() {
             requiresKeioBadge: Boolean(item.requires_keio_badge),
             isPrivate: Boolean(item.is_private),
             is_private: Boolean(item.is_private),
+            isLongTerm: isLongTerm,
+            is_long_term: isLongTerm,
+            durationSpan: item.duration_span || '',
+            duration_span: item.duration_span || '',
+            participationFrequency: item.participation_frequency || '',
+            participation_frequency: item.participation_frequency || '',
+            participantGuide: item.participant_guide || '',
+            participant_guide: item.participant_guide || '',
             requirements: Array.isArray(item.requirements)
               ? item.requirements
               : item.requirements
@@ -527,25 +548,36 @@ export function Dashboard() {
     ? experiments.find((e) => String(e.id) === String(nextOnlineBooking.experiment_id))
     : null
 
+  const nextOnlineIsLongTerm = Boolean(
+    (nextOnlineExperiment as any)?.is_long_term || (nextOnlineExperiment as any)?.isLongTerm
+  )
+  const nextOnlineDurationSpan =
+    (nextOnlineExperiment as any)?.duration_span || (nextOnlineExperiment as any)?.durationSpan || ''
+  const nextOnlineFrequency =
+    (nextOnlineExperiment as any)?.participation_frequency ||
+    (nextOnlineExperiment as any)?.participationFrequency ||
+    ''
+
   const nextOnlineExpiryHours = useMemo(() => {
+    if (nextOnlineIsLongTerm) return 0
     const expAny = nextOnlineExperiment as any
     const raw = expAny?.expiry_hours ?? expAny?.expiryHours
     return raw !== null && raw !== undefined ? Number(raw) : 24
-  }, [nextOnlineExperiment])
+  }, [nextOnlineExperiment, nextOnlineIsLongTerm])
 
-  // ★ 回答待ちオンライン調査があるときだけ1秒ごとにリアルタイム更新
   useEffect(() => {
-    if (!nextOnlineBooking) return
+    if (!nextOnlineBooking || nextOnlineIsLongTerm) return
     setNowMs(Date.now())
     const timer = setInterval(() => {
       setNowMs(Date.now())
     }, 1000)
     return () => clearInterval(timer)
-  }, [nextOnlineBooking])
+  }, [nextOnlineBooking, nextOnlineIsLongTerm])
 
-  const nextOnlineRemaining = nextOnlineBooking
-    ? formatRemainingTime(nextOnlineBooking.applied_at, nextOnlineExpiryHours, nowMs)
-    : null
+  const nextOnlineRemaining =
+    nextOnlineBooking && !nextOnlineIsLongTerm
+      ? formatRemainingTime(nextOnlineBooking.applied_at, nextOnlineExpiryHours, nowMs)
+      : null
 
   const handleConfirmBooking = (experimentId: string, slotId: string) => {
     setBookings((prev) => ({ ...prev, [experimentId]: slotId }))
@@ -695,38 +727,68 @@ export function Dashboard() {
             </section>
           ) : null}
 
-          {/* ② 回答待ちのオンライン調査セッション */}
+          {/* ② オンライン調査・継続実験セッション */}
           {nextOnlineBooking ? (
             <section
-              aria-label="Online Survey Awaiting Response"
-              className="rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/10 via-card to-card p-4 sm:p-5 shadow-xs transition-all"
+              aria-label="Online Study Session"
+              className={`rounded-2xl border p-4 sm:p-5 shadow-xs transition-all ${
+                nextOnlineIsLongTerm
+                  ? 'border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-card to-card'
+                  : 'border-blue-500/30 bg-gradient-to-br from-blue-500/10 via-card to-card'
+              }`}
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-500/20 pb-3">
+              <div
+                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3 ${
+                  nextOnlineIsLongTerm ? 'border-indigo-500/20' : 'border-blue-500/20'
+                }`}
+              >
                 <div className="flex items-center gap-2">
-                  <span className="flex size-7 items-center justify-center rounded-lg bg-blue-600 text-white">
-                    <FileText className="size-4" />
+                  <span
+                    className={`flex size-7 items-center justify-center rounded-lg text-white ${
+                      nextOnlineIsLongTerm ? 'bg-indigo-600' : 'bg-blue-600'
+                    }`}
+                  >
+                    {nextOnlineIsLongTerm ? (
+                      <CalendarRange className="size-4" />
+                    ) : (
+                      <FileText className="size-4" />
+                    )}
                   </span>
                   <span className="text-xs font-bold text-foreground">
-                    {isJa ? '回答待ちのオンライン調査（枠確保済み）' : 'Online Survey Awaiting Your Response'}
+                    {nextOnlineIsLongTerm
+                      ? isJa
+                        ? '参加中のオンライン継続実験'
+                        : 'Ongoing Online Study'
+                      : isJa
+                      ? '回答待ちのオンライン調査（枠確保済み）'
+                      : 'Online Survey Awaiting Your Response'}
                   </span>
                   <Badge
                     variant="outline"
-                    className="text-[10px] px-1.5 py-0 bg-background/80 text-blue-600 dark:text-blue-400 border-blue-500/30 font-semibold"
+                    className={`text-[10px] px-1.5 py-0 bg-background/80 font-semibold ${
+                      nextOnlineIsLongTerm
+                        ? 'text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+                        : 'text-blue-600 dark:text-blue-400 border-blue-500/30'
+                    }`}
                   >
-                    回答待ち
+                    {nextOnlineIsLongTerm ? '参加中' : '回答待ち'}
                   </Badge>
                 </div>
 
                 <div className="flex items-center gap-2">
                   {onlineReservedBookings.length > 1 && (
                     <span className="text-[11px] text-muted-foreground">
-                      他 {onlineReservedBookings.length - 1}件の未回答あり
+                      他 {onlineReservedBookings.length - 1}件あり
                     </span>
                   )}
                   <button
                     type="button"
                     onClick={() => openBookingsModal('online')}
-                    className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                    className={`text-xs font-bold hover:underline flex items-center gap-1 ${
+                      nextOnlineIsLongTerm
+                        ? 'text-indigo-600 dark:text-indigo-400'
+                        : 'text-blue-600 dark:text-blue-400'
+                    }`}
                   >
                     <span>{isJa ? `オンライン一覧（全${onlineReservedBookings.length}件）` : `View all (${onlineReservedBookings.length})`}</span>
                     <ArrowRight className="size-3.5" />
@@ -737,39 +799,58 @@ export function Dashboard() {
               <div className="pt-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1.5 min-w-0">
                   <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug truncate">
-                    {nextOnlineBooking.experiment_title || nextOnlineExperiment?.title || 'オンラインアンケート'}
+                    {nextOnlineBooking.experiment_title || nextOnlineExperiment?.title || 'オンライン調査'}
                   </h2>
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
-                      <Clock className="size-3.5" />
-                      <span>所要時間: 約{nextOnlineExperiment?.durationMins || 10}分</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <HeartHandshake className="size-3.5 text-muted-foreground" />
-                      <span>学内協力（謝礼なし）</span>
-                    </span>
-                    <span className="text-[11px] text-muted-foreground font-mono">
-                      エントリー: {formatAppliedDateTime(nextOnlineBooking.applied_at)}
-                    </span>
-                    <span className="text-[11px] text-foreground/80 font-medium">
-                      回答有効時間: {nextOnlineExpiryHours > 0 ? `${nextOnlineExpiryHours}時間以内` : '無制限'}
-                    </span>
-                    {nextOnlineRemaining && (
-                      <span
-                        className={`flex items-center gap-1 text-[11px] font-mono font-bold ${
-                          nextOnlineRemaining.isExpired || nextOnlineRemaining.isUrgent
-                            ? 'text-rose-500'
-                            : nextOnlineExpiryHours > 0
-                            ? 'text-amber-500'
-                            : 'text-emerald-500'
-                        }`}
-                      >
-                        <Timer className="size-3.5" />
-                        <span>回答残り時間: {nextOnlineRemaining.text}</span>
+                  {nextOnlineIsLongTerm ? (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {nextOnlineDurationSpan && (
+                        <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-semibold">
+                          <CalendarRange className="size-3.5" />
+                          <span>期間: {nextOnlineDurationSpan}</span>
+                        </span>
+                      )}
+                      {nextOnlineFrequency && (
+                        <span className="text-foreground/80 font-medium">
+                          頻度目安: {nextOnlineFrequency}
+                        </span>
+                      )}
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        参加登録: {formatAppliedDateTime(nextOnlineBooking.applied_at)}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
+                        <Clock className="size-3.5" />
+                        <span>所要時間: 約{nextOnlineExperiment?.durationMins || 10}分</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <HeartHandshake className="size-3.5 text-muted-foreground" />
+                        <span>学内協力（謝礼なし）</span>
+                      </span>
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        エントリー: {formatAppliedDateTime(nextOnlineBooking.applied_at)}
+                      </span>
+                      <span className="text-[11px] text-foreground/80 font-medium">
+                        回答有効時間: {nextOnlineExpiryHours > 0 ? `${nextOnlineExpiryHours}時間以内` : '無制限'}
+                      </span>
+                      {nextOnlineRemaining && (
+                        <span
+                          className={`flex items-center gap-1 text-[11px] font-mono font-bold ${
+                            nextOnlineRemaining.isExpired || nextOnlineRemaining.isUrgent
+                              ? 'text-rose-500'
+                              : nextOnlineExpiryHours > 0
+                              ? 'text-amber-500'
+                              : 'text-emerald-500'
+                          }`}
+                        >
+                          <Timer className="size-3.5" />
+                          <span>回答残り時間: {nextOnlineRemaining.text}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
@@ -777,9 +858,21 @@ export function Dashboard() {
                     <Button
                       size="sm"
                       onClick={() => openExperiment(nextOnlineExperiment)}
-                      className="h-8 text-xs font-bold gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                      className={`h-8 text-xs font-bold gap-1 text-white ${
+                        nextOnlineIsLongTerm
+                          ? 'bg-indigo-600 hover:bg-indigo-700'
+                          : 'bg-blue-600 hover:bg-blue-700'
+                      }`}
                     >
-                      <span>{isJa ? '今すぐ回答する' : 'Start Survey'}</span>
+                      <span>
+                        {nextOnlineIsLongTerm
+                          ? isJa
+                            ? '参加者案内・詳細を確認'
+                            : 'View Guide'
+                          : isJa
+                          ? '今すぐ回答する'
+                          : 'Start Survey'}
+                      </span>
                       <ArrowRight className="size-3.5" />
                     </Button>
                   )}
@@ -965,7 +1058,7 @@ export function Dashboard() {
               {modeTab === 'in-person'
                 ? isJa ? '学内対面実験一覧' : 'In-Person Lab Studies'
                 : modeTab === 'online'
-                ? isJa ? 'オンライン回答・調査一覧' : 'Online Surveys & Studies'
+                ? isJa ? 'オンライン実験・調査一覧' : 'Online Surveys & Studies'
                 : isJa ? '現在募集中の実験・調査' : 'Active Studies'}
             </h1>
             <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground">

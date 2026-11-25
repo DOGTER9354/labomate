@@ -15,6 +15,7 @@ import {
   Building2,
   Globe2,
   Calendar as CalendarIcon,
+  CalendarRange,
   Plus,
   Trash2,
   AlertCircle,
@@ -39,6 +40,7 @@ import {
   CheckCircle2,
   Copy,
   Check,
+  KeyRound,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
@@ -91,6 +93,11 @@ export function CreateExperimentDialog({
   const [copiedLink, setCopiedLink] = useState(false)
 
   const [mode, setMode] = useState<'in-person' | 'online'>('in-person')
+  const [isLongTerm, setIsLongTerm] = useState<boolean>(false)
+  const [durationSpan, setDurationSpan] = useState('')
+  const [participationFrequency, setParticipationFrequency] = useState('')
+  const [participantGuide, setParticipantGuide] = useState('')
+
   const [isPrivate, setIsPrivate] = useState<boolean>(false)
   const [title, setTitle] = useState('')
   const [labName, setLabName] = useState('')
@@ -199,8 +206,18 @@ export function CreateExperimentDialog({
     setAllowDuplicateSlot(false)
 
     if (initialData) {
-      const isOnline = initialData.format === 'オンライン' || Boolean(initialData.survey_url)
+      const isOnline =
+        initialData.format === 'オンライン' ||
+        Boolean(initialData.survey_url) ||
+        initialData.location?.includes('オンライン')
       setMode(isOnline ? 'online' : 'in-person')
+      setIsLongTerm(Boolean(initialData.is_long_term || initialData.isLongTerm))
+      setDurationSpan(initialData.duration_span || initialData.durationSpan || '')
+      setParticipationFrequency(
+        initialData.participation_frequency || initialData.participationFrequency || ''
+      )
+      setParticipantGuide(initialData.participant_guide || initialData.participantGuide || '')
+
       setIsPrivate(Boolean(initialData.is_private || initialData.isPrivate))
       setTitle(initialData.title || '')
       setLabName(initialData.lab_name || initialData.labName || '')
@@ -270,6 +287,10 @@ export function CreateExperimentDialog({
       setIsTotalManuallyEdited(true)
     } else {
       setMode('in-person')
+      setIsLongTerm(false)
+      setDurationSpan('')
+      setParticipationFrequency('')
+      setParticipantGuide('')
       setIsPrivate(false)
       setTitle('')
       setLabName('')
@@ -389,6 +410,11 @@ export function CreateExperimentDialog({
       return
     }
 
+    if (isLongTerm && !durationSpan.trim()) {
+      setErrorMsg('継続実験の実験期間（例：2週間 / 全3回）を入力してください。')
+      return
+    }
+
     if (mode === 'in-person' && !location.trim()) {
       setErrorMsg('実施場所（教室・ラボ）を入力してください。')
       return
@@ -400,7 +426,8 @@ export function CreateExperimentDialog({
       return
     }
 
-    if (mode === 'online' && !surveyUrl.trim()) {
+    // 単発オンラインアンケートのみ回答URLを必須にする（継続実験ではDiscord案内等を任意入力可能）
+    if (mode === 'online' && !isLongTerm && !surveyUrl.trim()) {
       setErrorMsg('オンラインアンケートの回答URL（Google Forms等）を入力してください。')
       return
     }
@@ -421,7 +448,7 @@ export function CreateExperimentDialog({
     }
 
     if (mode === 'in-person' && slots.length === 0) {
-      setErrorMsg('対面実験の募集スロット枠を少なくとも1つ追加してください。')
+      setErrorMsg('対面実験の募集スロット枠（初回オリエンテーション・実験日時など）を少なくとも1つ追加してください。')
       return
     }
 
@@ -443,14 +470,14 @@ export function CreateExperimentDialog({
 
     try {
       const finalRewardType =
-        mode === 'online'
+        mode === 'online' && !isLongTerm
           ? '謝礼なし（学内協力・ボランティア型）'
           : rewardType === 'その他'
           ? customRewardType.trim() || 'その他'
           : rewardType
 
       const finalRewardAmount =
-        mode === 'online' || isAmountDisabled
+        (mode === 'online' && !isLongTerm) || isAmountDisabled
           ? 0
           : parseInt(rewardAmount) || 0
 
@@ -483,27 +510,46 @@ export function CreateExperimentDialog({
       if (requiredGender === 'female') generatedRequirements.push('女性限定')
       customQualifications.forEach((q) => generatedRequirements.push(q))
 
-      const finalClosingDate = mode === 'online' && hasClosingDate && onlineClosingDate ? onlineClosingDate : null
+      const finalClosingDate =
+        mode === 'online' && hasClosingDate && onlineClosingDate ? onlineClosingDate : null
       const parsedExpiryHours = parseInt(expiryHours, 10)
+
+      // 継続オンライン実験は自動失効させないため 0（無制限）を保存
+      const finalExpiryHours =
+        mode === 'online'
+          ? isLongTerm
+            ? 0
+            : Number.isNaN(parsedExpiryHours)
+            ? 24
+            : parsedExpiryHours
+          : null
 
       const experimentPayload: any = {
         title: title.trim(),
         lab_name: labName.trim(),
         format: mode === 'online' ? 'オンライン' : '学内対面',
-        location: mode === 'online' ? 'オンライン（Webアンケート）' : location.trim(),
+        location:
+          mode === 'online'
+            ? isLongTerm
+              ? 'オンライン（継続実験・Discord等）'
+              : 'オンライン（Webアンケート）'
+            : location.trim(),
         duration_mins: parseInt(durationMins) || 30,
         reward_amount: finalRewardAmount,
         reward_type: finalRewardType,
         description: description.trim(),
-        survey_url: mode === 'online' ? surveyUrl.trim() : null,
-        // ★ 0（無制限）を 24 に上書きしないよう NaN チェックで判定
-        expiry_hours: mode === 'online' ? (Number.isNaN(parsedExpiryHours) ? 24 : parsedExpiryHours) : null,
+        survey_url: mode === 'online' && surveyUrl.trim() ? surveyUrl.trim() : null,
+        expiry_hours: finalExpiryHours,
         closing_date: finalClosingDate,
         deadline: finalClosingDate,
         spots_total: totalSpots,
         allow_multiple_slots: allowMultipleSlots,
         requires_keio_badge: requiresKeioBadge,
         is_private: isPrivate,
+        is_long_term: isLongTerm,
+        duration_span: isLongTerm ? durationSpan.trim() || null : null,
+        participation_frequency: isLongTerm ? participationFrequency.trim() || null : null,
+        participant_guide: isLongTerm ? participantGuide.trim() || null : null,
         requirements: generatedRequirements,
         filter_prior_knowledge: filterPriorKnowledge,
         filter_same_lab: filterSameLab,
@@ -668,38 +714,141 @@ export function CreateExperimentDialog({
                 <DialogDescription className="text-xs text-muted-foreground">
                   {isEditing
                     ? '募集内容や公開範囲、参加枠を更新します。'
-                    : '対面実験またはオンラインアンケートの募集要項と参加枠を設定します。'}
+                    : '実施形式（対面 / オンライン）と期間タイプ（単発 / 継続）を選んで募集を作成します。'}
                 </DialogDescription>
               </DialogHeader>
 
               <form onSubmit={handlePreSubmit} className="space-y-5 pt-1">
-                {/* 実施形式選択 */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange('in-person')}
-                    className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
-                      mode === 'in-person'
-                        ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
-                        : 'bg-card text-muted-foreground hover:bg-muted/40'
-                    }`}
-                  >
-                    <Building2 className="size-4" />
-                    <span>学内対面実験</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange('online')}
-                    className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
-                      mode === 'online'
-                        ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
-                        : 'bg-card text-muted-foreground hover:bg-muted/40'
-                    }`}
-                  >
-                    <Globe2 className="size-4" />
-                    <span>オンラインアンケート</span>
-                  </button>
+                {/* ① 実施形式選択（対面 / オンライン） */}
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-bold">
+                    1. 実施場所・形式
+                  </Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleModeChange('in-person')}
+                      className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
+                        mode === 'in-person'
+                          ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
+                          : 'bg-card text-muted-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <Building2 className="size-4" />
+                      <span>対面実験</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleModeChange('online')}
+                      className={`p-3.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2.5 transition-all ${
+                        mode === 'online'
+                          ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
+                          : 'bg-card text-muted-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <Globe2 className="size-4" />
+                      <span>オンライン</span>
+                    </button>
+                  </div>
                 </div>
+
+                {/* ② 期間タイプ選択（単発実験 / 継続実験） */}
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground font-bold">
+                    2. 参加期間タイプ
+                  </Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsLongTerm(false)}
+                      className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${
+                        !isLongTerm
+                          ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/30'
+                          : 'bg-card text-muted-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="size-3.5" />
+                        <span>単発実験</span>
+                      </span>
+                      <span className="text-[10px] font-normal opacity-80">
+                        1回完結・スキマ時間向け
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsLongTerm(true)}
+                      className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${
+                        isLongTerm
+                          ? 'border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shadow-xs ring-1 ring-indigo-500/30'
+                          : 'bg-card text-muted-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <CalendarRange className="size-3.5" />
+                        <span>継続実験</span>
+                      </span>
+                      <span className="text-[10px] font-normal opacity-80">
+                        複数回・数日〜数週間の参加
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* ★ 継続実験専用の期間・頻度・参加者限定アクセス案内 */}
+                {isLongTerm && (
+                  <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 space-y-4 text-xs animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold">
+                      <CalendarRange className="size-4 shrink-0" />
+                      <span>継続実験のスケジュール・参加者限定案内</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground flex items-center gap-1">
+                          <span>実験期間（目安）</span>
+                          <span className="text-rose-500">*</span>
+                        </Label>
+                        <Input
+                          required={isLongTerm}
+                          placeholder="例: 2週間 / 1ヶ月 / 全3回"
+                          value={durationSpan}
+                          onChange={(e) => setDurationSpan(e.target.value)}
+                          className="text-xs h-10 bg-background"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-bold text-foreground">
+                          参加頻度・稼働目安（任意）
+                        </Label>
+                        <Input
+                          placeholder="例: 週2〜3回・各30分程度 / 毎日5分の記録"
+                          value={participationFrequency}
+                          onChange={(e) => setParticipationFrequency(e.target.value)}
+                          className="text-xs h-10 bg-background"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="font-bold text-foreground flex items-center gap-1.5">
+                        <KeyRound className="size-3.5 text-indigo-500" />
+                        <span>参加者限定アクセス案内（Discord招待URL・サーバー情報など）</span>
+                      </Label>
+                      <textarea
+                        rows={3}
+                        placeholder="例: 応募確定後にこちらのDiscordサーバーへ参加してください: https://discord.gg/xxxx&#10;サーバーIPや初回オリエンテーション案内なども記載できます。"
+                        value={participantGuide}
+                        onChange={(e) => setParticipantGuide(e.target.value)}
+                        className="w-full rounded-md border border-input bg-background p-2.5 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        ※ 荒らし・無断参加防止のため、この欄の内容は<strong>応募を確定した被験者にのみ</strong>自動で開示されます。
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* 公開範囲設定（全体公開 / 限定公開・クローズ案件） */}
                 <div className="p-4 rounded-xl border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -750,7 +899,11 @@ export function CreateExperimentDialog({
                   <Label className="font-bold text-foreground">実験タイトル *</Label>
                   <Input
                     required
-                    placeholder="例: 意思決定における視覚刺激の影響に関する認知実験"
+                    placeholder={
+                      isLongTerm
+                        ? '例: 【2週間継続】AI統治空間におけるマルチプレイヤー行動実験（Minecraft）'
+                        : '例: 意思決定における視覚刺激の影響に関する認知実験'
+                    }
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     className="text-xs h-10"
@@ -762,14 +915,14 @@ export function CreateExperimentDialog({
                   <Label className="font-bold text-foreground">実験概要・詳細（任意）</Label>
                   <textarea
                     rows={3}
-                    placeholder="実験の内容、持ち物、当日の流れなどを記載してください。"
+                    placeholder="実験の内容、使用環境（PC / Minecraft Java版など）、参加の流れなどを記載してください。"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     className="w-full rounded-md border border-input bg-background p-2.5 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none"
                   />
                 </div>
 
-                {/* 研究室名 & 実施場所 */}
+                {/* 研究室名 & 実施場所 / 回答URL */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                   <div className="space-y-1.5">
                     <Label className="font-bold text-foreground flex items-center gap-1">
@@ -778,7 +931,7 @@ export function CreateExperimentDialog({
                     </Label>
                     <Input
                       required
-                      placeholder="例: SFC 認知科学研究室"
+                      placeholder="例: SFC 中澤研究室 (d-hacks)"
                       value={labName}
                       onChange={(e) => setLabName(e.target.value)}
                       className="text-xs h-10"
@@ -802,11 +955,15 @@ export function CreateExperimentDialog({
                   ) : (
                     <div className="space-y-1.5">
                       <Label className="font-bold text-foreground flex items-center gap-1">
-                        <span>回答URL（Google Forms等）</span>
-                        <span className="text-rose-500">*</span>
+                        <span>
+                          {isLongTerm
+                            ? '事前アンケートURL（任意・Google Forms等）'
+                            : '回答URL（Google Forms等）'}
+                        </span>
+                        {!isLongTerm && <span className="text-rose-500">*</span>}
                       </Label>
                       <Input
-                        required
+                        required={!isLongTerm}
                         placeholder="https://forms.gle/..."
                         value={surveyUrl}
                         onChange={(e) => setSurveyUrl(e.target.value)}
@@ -816,23 +973,77 @@ export function CreateExperimentDialog({
                   )}
                 </div>
 
-                {/* オンラインアンケート用設定エリア */}
+                {/* オンライン用設定エリア */}
                 {mode === 'online' ? (
                   <div className="space-y-4">
-                    <div className="p-3.5 rounded-xl border bg-muted/20 flex items-start gap-2.5 text-xs">
-                      <HeartHandshake className="size-4 text-primary shrink-0 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <p className="font-bold text-foreground">オンライン回答の謝礼について</p>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          公費・研究費の監査および規程に準拠するため、オンライン調査は「学内協力・ボランティア型（謝礼なし）」として募集されます。
-                        </p>
+                    {!isLongTerm ? (
+                      <div className="p-3.5 rounded-xl border bg-muted/20 flex items-start gap-2.5 text-xs">
+                        <HeartHandshake className="size-4 text-primary shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="font-bold text-foreground">単発オンライン回答の謝礼について</p>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            公費・研究費の監査および規程に準拠するため、単発のオンライン調査は「学内協力・ボランティア型（謝礼なし）」として募集されます。
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      /* オンライン継続実験の場合は謝礼設定も可能にする */
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                        <div className="space-y-1.5">
+                          <Label className="font-bold text-foreground">謝礼種別</Label>
+                          <select
+                            value={rewardType}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setRewardType(val)
+                              if (val === '謝礼なし') setRewardAmount('0')
+                            }}
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring font-medium"
+                          >
+                            {REWARD_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="font-bold text-foreground">
+                            謝礼金額（円）
+                            {isAmountDisabled && (
+                              <span className="text-[10px] text-muted-foreground font-normal ml-1">
+                                （不要）
+                              </span>
+                            )}
+                          </Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            disabled={isAmountDisabled}
+                            value={isAmountDisabled ? '0' : rewardAmount}
+                            onChange={(e) => setRewardAmount(e.target.value)}
+                            className="text-xs h-10 disabled:opacity-40 disabled:bg-muted/40 font-bold"
+                          />
+                        </div>
+                        {rewardType === 'その他' && (
+                          <div className="sm:col-span-2 space-y-1.5">
+                            <Label className="font-bold text-foreground">謝礼の詳細 *</Label>
+                            <Input
+                              required
+                              placeholder="例: Amazonギフト券 1,500円分（実験期間完了後）"
+                              value={customRewardType}
+                              onChange={(e) => setCustomRewardType(e.target.value)}
+                              className="text-xs h-10"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                       <div className="space-y-1.5">
                         <Label className="font-bold text-foreground flex items-center gap-1">
-                          <span>目安所要時間（分）</span>
+                          <span>{isLongTerm ? '1回あたりの目安時間（分）' : '目安所要時間（分）'}</span>
                           <span className="text-rose-500">*</span>
                         </Label>
                         <Input
@@ -861,26 +1072,38 @@ export function CreateExperimentDialog({
                         </div>
                       </div>
 
-                      <div className="space-y-1.5">
-                        <Label className="font-bold text-foreground flex items-center gap-1">
-                          <Clock className="size-3.5 text-primary" />
-                          <span>回答の有効期限（自動失効時間）</span>
-                        </Label>
-                        <select
-                          value={expiryHours}
-                          onChange={(e) => setExpiryHours(e.target.value)}
-                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                        >
-                          {EXPIRY_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-[10px] text-muted-foreground">
-                          ※ 枠確保後この時間を過ぎても未回答の場合、自動で枠が全体に返却されます。
-                        </p>
-                      </div>
+                      {!isLongTerm ? (
+                        <div className="space-y-1.5">
+                          <Label className="font-bold text-foreground flex items-center gap-1">
+                            <Clock className="size-3.5 text-primary" />
+                            <span>回答の有効期限（自動失効時間）</span>
+                          </Label>
+                          <select
+                            value={expiryHours}
+                            onChange={(e) => setExpiryHours(e.target.value)}
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                          >
+                            {EXPIRY_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[10px] text-muted-foreground">
+                            ※ 枠確保後この時間を過ぎても未回答の場合、自動で枠が全体に返却されます。
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3.5 rounded-xl border bg-muted/20 flex flex-col justify-center space-y-1">
+                          <p className="font-bold text-foreground flex items-center gap-1.5">
+                            <Clock className="size-3.5 text-indigo-500" />
+                            <span>有効期限：実験期間中ずっと有効</span>
+                          </p>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            継続実験のため、応募後の自動タイムアウト（24時間失効）は無効になり、期間中は参加中ステータスが維持されます。
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="p-3.5 rounded-xl border bg-card space-y-2.5 text-xs">
@@ -888,7 +1111,7 @@ export function CreateExperimentDialog({
                         <div className="space-y-0.5">
                           <p className="font-bold text-foreground flex items-center gap-1.5">
                             <CalendarDays className="size-4 text-primary" />
-                            <span>アンケート全体の受付終了日（最終締切日）</span>
+                            <span>新規募集の受付終了日（最終締切日）</span>
                           </p>
                           <p className="text-[11px] text-muted-foreground">
                             指定した日付を過ぎると自動的に募集が締め切られ、新規の参加受付が終了します。
@@ -925,7 +1148,7 @@ export function CreateExperimentDialog({
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
                       <div className="space-y-1.5">
                         <Label className="font-bold text-foreground flex items-center gap-1">
-                          <span>所要時間（分）</span>
+                          <span>{isLongTerm ? '1回あたりの所要時間（分）' : '所要時間（分）'}</span>
                           <span className="text-rose-500">*</span>
                         </Label>
                         <Input
@@ -1236,8 +1459,8 @@ export function CreateExperimentDialog({
                   )}
                 </div>
 
-                {/* オンラインアンケート用：複数回回答設定 */}
-                {mode === 'online' && (
+                {/* オンラインアンケート用：複数回回答設定（単発アンケートのみ表示） */}
+                {mode === 'online' && !isLongTerm && (
                   <div className="p-4 rounded-xl border bg-card flex items-start justify-between gap-3 text-xs">
                     <div className="space-y-0.5">
                       <p className="font-bold text-foreground flex items-center gap-1.5">
@@ -1279,7 +1502,7 @@ export function CreateExperimentDialog({
                             : slots.length === 0
                             ? '下のスロット枠を追加すると自動計算されます'
                             : 'スロット枠の定員合計から自動計算中'
-                          : 'オンライン回答を受け付ける上限人数'}
+                          : 'オンライン参加を受け付ける上限人数'}
                       </p>
                     </div>
 
@@ -1317,7 +1540,9 @@ export function CreateExperimentDialog({
                     <div className="flex items-center justify-between">
                       <Label className="text-sm font-bold text-foreground flex items-center gap-1.5">
                         <CalendarIcon className="size-4 text-primary" />
-                        <span>募集スロット枠設定</span>
+                        <span>
+                          {isLongTerm ? '初回実施・日程スロット枠設定' : '募集スロット枠設定'}
+                        </span>
                       </Label>
                       <span className="text-xs text-muted-foreground font-medium">
                         計 {slots.length} 枠登録済み
@@ -1332,8 +1557,8 @@ export function CreateExperimentDialog({
                         </p>
                         <p className="text-[11px] text-muted-foreground leading-snug">
                           {allowMultipleSlots
-                            ? '1人の被験者が複数の異なる時間スロットに応募できます（作業系・長期実験向け）'
-                            : '1人の被験者は1つのスロットにしか参加できません（一般的な心理・認知実験向け）'}
+                            ? '1人の被験者が複数の異なる時間スロットに応募できます'
+                            : '1人の被験者は1つのスロットにしか参加できません'}
                         </p>
                       </div>
                       <button

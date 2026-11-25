@@ -14,6 +14,7 @@ import {
   Calendar,
   Clock,
   Timer,
+  CalendarRange,
   Building2,
   Globe2,
   XCircle,
@@ -43,6 +44,13 @@ interface ApplicationItem {
   format: string
   status: string
   applied_at: string
+}
+
+interface ExpMetaInfo {
+  expiryHours: number
+  isLongTerm: boolean
+  durationSpan: string
+  participationFrequency: string
 }
 
 function formatRemainingTime(
@@ -98,7 +106,7 @@ export function MyBookingsDialog({
 }: MyBookingsDialogProps) {
   const { user } = useAuth()
   const [applications, setApplications] = useState<ApplicationItem[]>([])
-  const [expiryMap, setExpiryMap] = useState<Record<string, number>>({})
+  const [expMetaMap, setExpMetaMap] = useState<Record<string, ExpMetaInfo>>({})
   const [loading, setLoading] = useState(false)
   const [cancelingId, setCancelingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -113,7 +121,6 @@ export function MyBookingsDialog({
     }
   }, [open, initialType])
 
-  // ★ モーダルが開いている間、1秒ごとに残り時間をリアルタイム更新
   useEffect(() => {
     if (!open) return
     setNowMs(Date.now())
@@ -126,7 +133,7 @@ export function MyBookingsDialog({
   const fetchMyBookings = useCallback(async () => {
     if (!user) {
       setApplications([])
-      setExpiryMap({})
+      setExpMetaMap({})
       return
     }
 
@@ -153,27 +160,32 @@ export function MyBookingsDialog({
           return true
         })
 
-        // 関連する募集の expiry_hours を取得
         const expIds = Array.from(new Set(activeOnly.map((a) => a.experiment_id).filter(Boolean)))
-        const nextExpiryMap: Record<string, number> = {}
+        const nextMetaMap: Record<string, ExpMetaInfo> = {}
 
         if (expIds.length > 0) {
           const { data: expData } = await supabase
             .from('experiments')
-            .select('id, expiry_hours')
+            .select('id, expiry_hours, is_long_term, duration_span, participation_frequency')
             .in('id', expIds)
 
           if (expData) {
             for (const exp of expData) {
-              nextExpiryMap[String(exp.id)] =
-                exp.expiry_hours !== null && exp.expiry_hours !== undefined
+              const isLt = Boolean(exp.is_long_term)
+              nextMetaMap[String(exp.id)] = {
+                expiryHours: isLt
+                  ? 0
+                  : exp.expiry_hours !== null && exp.expiry_hours !== undefined
                   ? Number(exp.expiry_hours)
-                  : 24
+                  : 24,
+                isLongTerm: isLt,
+                durationSpan: exp.duration_span || '',
+                participationFrequency: exp.participation_frequency || '',
+              }
             }
           }
         }
 
-        // 各募集の設定（expiry_hours > 0）に基づいて期限切れチェック
         const now = Date.now()
         const expiredApps: ApplicationItem[] = []
         const validApps: ApplicationItem[] = []
@@ -184,11 +196,10 @@ export function MyBookingsDialog({
             item.slot_id === 'online_survey' ||
             item.slot_time?.includes('オンライン')
 
-          if (isOnline) {
-            const expExpiry =
-              nextExpiryMap[String(item.experiment_id)] !== undefined
-                ? nextExpiryMap[String(item.experiment_id)]
-                : 24
+          const meta = nextMetaMap[String(item.experiment_id)]
+
+          if (isOnline && !meta?.isLongTerm) {
+            const expExpiry = meta ? meta.expiryHours : 24
             if (expExpiry > 0) {
               const appliedTime = new Date(item.applied_at).getTime()
               const maxDuration = expExpiry * 60 * 60 * 1000
@@ -210,7 +221,7 @@ export function MyBookingsDialog({
             .then(() => {})
         }
 
-        setExpiryMap(nextExpiryMap)
+        setExpMetaMap(nextMetaMap)
         setApplications(validApps)
       }
     } catch (err) {
@@ -253,7 +264,10 @@ export function MyBookingsDialog({
 
   const handleCancelBooking = async (app: ApplicationItem) => {
     const isOnline = isOnlineItem(app)
-    const promptText = isOnline
+    const meta = expMetaMap[String(app.experiment_id)]
+    const promptText = meta?.isLongTerm
+      ? `「${app.experiment_title}」の継続実験への参加を辞退しますか？`
+      : isOnline
       ? `「${app.experiment_title}」の回答枠確保を辞退・キャンセルしますか？\n（確保した枠は全体に返却されます）`
       : `「${app.experiment_title}」の予約をキャンセルしますか？`
 
@@ -304,7 +318,7 @@ export function MyBookingsDialog({
         console.warn('Slot restore notice:', slotErr)
       }
 
-      setNotice(isOnline ? '枠の確保を辞退しました。' : '予約をキャンセルしました。')
+      setNotice(isOnline ? '参加・枠の確保を辞退しました。' : '予約をキャンセルしました。')
       setApplications((prev) => prev.filter((item) => item.id !== app.id))
 
       if (onBookingCanceled) {
@@ -329,13 +343,13 @@ export function MyBookingsDialog({
             <DialogTitle className="text-base font-bold text-foreground">
               {activeTab === 'in-person'
                 ? '対面参加予定の実験一覧'
-                : '回答待ちのオンライン調査一覧'}
+                : 'オンライン実験・調査一覧'}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
             {activeTab === 'in-person'
               ? 'あなたが現在予約している対面実験の一覧です。'
-              : '回答枠を確保済みのオンライン調査です。有効時間内にご回答ください。'}
+              : '参加中・回答待ちのオンライン実験および調査の一覧です。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -385,23 +399,23 @@ export function MyBookingsDialog({
               <p className="text-xs font-bold text-foreground">
                 {activeTab === 'in-person'
                   ? '現在予約中の対面実験はありません'
-                  : '回答待ちのオンライン調査はありません'}
+                  : '参加中・回答待ちのオンライン実験はありません'}
               </p>
               <p className="text-[11px] text-muted-foreground">
-                一覧から気になる実験に応募・回答してみましょう！
+                一覧から気になる実験に応募・参加してみましょう！
               </p>
             </div>
           ) : (
             <div className="space-y-2.5">
               {filteredApplications.map((app) => {
                 const isOnline = isOnlineItem(app)
-                const expExpiry =
-                  expiryMap[String(app.experiment_id)] !== undefined
-                    ? expiryMap[String(app.experiment_id)]
-                    : 24
-                const remaining = isOnline
-                  ? formatRemainingTime(app.applied_at, expExpiry, nowMs)
-                  : null
+                const meta = expMetaMap[String(app.experiment_id)]
+                const isLongTerm = Boolean(meta?.isLongTerm)
+                const expExpiry = meta ? meta.expiryHours : 24
+                const remaining =
+                  isOnline && !isLongTerm
+                    ? formatRemainingTime(app.applied_at, expExpiry, nowMs)
+                    : null
 
                 return (
                   <div
@@ -409,19 +423,29 @@ export function MyBookingsDialog({
                     className="p-3.5 rounded-xl border bg-card/70 space-y-2.5 hover:border-foreground/30 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {isOnline ? (
-                          <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
-                            <Globe2 className="size-3" /> オンライン調査
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <Building2 className="size-3" /> 学内対面
-                          </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {isOnline ? (
+                            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
+                              <Globe2 className="size-3" /> オンライン・{isLongTerm ? '継続' : '単発'}
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              <Building2 className="size-3" /> 対面・{isLongTerm ? '継続' : '単発'}
+                            </span>
+                          )}
+                        </Badge>
+                        {isLongTerm && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 py-0 bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 font-bold"
+                          >
+                            継続実験
+                          </Badge>
                         )}
-                      </Badge>
-                      <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded">
-                        {isOnline ? '枠確保済み' : (app.status || '確定')}
+                      </div>
+                      <span className="text-[10px] text-emerald-500 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded shrink-0">
+                        {isLongTerm ? '参加中' : isOnline ? '枠確保済み' : app.status || '確定'}
                       </span>
                     </div>
 
@@ -437,39 +461,70 @@ export function MyBookingsDialog({
                       )}
                     </div>
 
-                    {/* ★ オンライン調査のエントリー日時・有効時間・リアルタイム残り時間 */}
-                    {isOnline && remaining && (
-                      <div className="p-2.5 rounded-lg bg-muted/30 border space-y-1 text-[11px]">
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">エントリー日時</span>
-                          <span className="font-mono text-foreground font-medium">
-                            {formatAppliedDateTime(app.applied_at)}
-                          </span>
+                    {isOnline && (
+                      isLongTerm ? (
+                        <div className="p-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 space-y-1 text-[11px]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">参加登録日時</span>
+                            <span className="font-mono text-foreground font-medium">
+                              {formatAppliedDateTime(app.applied_at)}
+                            </span>
+                          </div>
+                          {meta?.durationSpan && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <CalendarRange className="size-3 text-indigo-500" />
+                                <span>実験期間</span>
+                              </span>
+                              <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                                {meta.durationSpan}
+                              </span>
+                            </div>
+                          )}
+                          {meta?.participationFrequency && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">参加頻度目安</span>
+                              <span className="text-foreground font-medium">
+                                {meta.participationFrequency}
+                              </span>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">回答有効時間</span>
-                          <span className="text-foreground font-medium">
-                            {expExpiry > 0 ? `${expExpiry}時間以内` : '無制限'}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between pt-1 border-t border-border/60">
-                          <span className="text-muted-foreground flex items-center gap-1 font-medium">
-                            <Timer className="size-3 text-primary" />
-                            <span>回答残り時間</span>
-                          </span>
-                          <span
-                            className={`font-mono font-bold ${
-                              remaining.isExpired || remaining.isUrgent
-                                ? 'text-rose-500'
-                                : expExpiry > 0
-                                ? 'text-amber-500'
-                                : 'text-emerald-500'
-                            }`}
-                          >
-                            {remaining.text}
-                          </span>
-                        </div>
-                      </div>
+                      ) : (
+                        remaining && (
+                          <div className="p-2.5 rounded-lg bg-muted/30 border space-y-1 text-[11px]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">エントリー日時</span>
+                              <span className="font-mono text-foreground font-medium">
+                                {formatAppliedDateTime(app.applied_at)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">回答有効時間</span>
+                              <span className="text-foreground font-medium">
+                                {expExpiry > 0 ? `${expExpiry}時間以内` : '無制限'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between pt-1 border-t border-border/60">
+                              <span className="text-muted-foreground flex items-center gap-1 font-medium">
+                                <Timer className="size-3 text-primary" />
+                                <span>回答残り時間</span>
+                              </span>
+                              <span
+                                className={`font-mono font-bold ${
+                                  remaining.isExpired || remaining.isUrgent
+                                    ? 'text-rose-500'
+                                    : expExpiry > 0
+                                    ? 'text-amber-500'
+                                    : 'text-emerald-500'
+                                }`}
+                              >
+                                {remaining.text}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      )
                     )}
 
                     <div className="flex items-center justify-between pt-2 border-t text-[11px]">
@@ -483,11 +538,21 @@ export function MyBookingsDialog({
                           }
                         }}
                         className={`h-7 px-2.5 text-xs font-bold gap-1 bg-background ${
-                          isOnline ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10' : ''
+                          isLongTerm
+                            ? 'border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10'
+                            : isOnline
+                            ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
+                            : ''
                         }`}
                       >
                         <ExternalLink className="size-3" />
-                        <span>{isOnline ? '回答を進める' : '詳細を確認'}</span>
+                        <span>
+                          {isLongTerm
+                            ? '参加者案内・詳細'
+                            : isOnline
+                            ? '回答を進める'
+                            : '詳細を確認'}
+                        </span>
                       </Button>
 
                       <Button
@@ -502,7 +567,7 @@ export function MyBookingsDialog({
                         ) : (
                           <XCircle className="size-3" />
                         )}
-                        <span>{isOnline ? '枠を辞退' : 'キャンセル'}</span>
+                        <span>{isOnline ? '辞退' : 'キャンセル'}</span>
                       </Button>
                     </div>
                   </div>
